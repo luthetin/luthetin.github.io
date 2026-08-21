@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>程序 · 周新旭 — 探索台项目</title>
+<title>程序 · 周新旭 — 项目列表</title>
 <meta name="description" content="周新旭的编程作品：探索台，一个挂在 DeepSeek Harness 上的个人工作台 Cordis 插件，前后端全自研，已开源。">
 <meta name="keywords" content="周新旭,探索台,Cordis,插件,DeepSeek,程序项目,开源">
-<link rel="stylesheet" href="assets/css/style.css?v=3">
+<link rel="stylesheet" href="assets/css/style.css?v=4">
 </head>
 <body>
 
@@ -23,37 +23,20 @@
 
 <div class="proj">
 
-  <h1>探索台 · Explore Hub</h1>
-  <div class="meta">个人工作台 · Cordis 插件 · 2026 年 · 前后端全自研 · 已开源</div>
+  <h1>程序作品</h1>
+  <div class="meta">一个按钮一个项目 · 点进去看详细介绍</div>
 
-  <p>「探索台」是一个挂在 <b>DeepSeek Harness</b> 上的个人工作台插件：把「探索方向」「钱与时间」「目标计划」「日历日程」「API 钱包」收进同一个侧边栏，既能在浏览器里点，也能直接对 AI 说自然语言让它代劳。所有数据存在本地，自己完全掌控。</p>
+  <div class="plist">
 
-  <p>项目现已开源：<a href="https://github.com/luthetin/explore-hub" target="_blank" rel="noopener">github.com/luthetin/explore-hub</a></p>
+    <!-- ── 项目按钮：复制这一段，改名字/简介/href，再建一个对应详情页 ── -->
+    <a class="pcard" href="explore-hub.html">
+      <div class="k">探索台 · Explore Hub</div>
+      <div class="d">挂在 DeepSeek Harness 上的个人工作台插件：探索方向、记账、目标计划、日历日程、课程管理（docx 导入）、AI 规划助手……前后端全自研，数据本地存储，已开源。</div>
+      <div class="go">查看项目介绍 →</div>
+    </a>
+    <!-- ── 复制到这里为止 ── -->
 
-  <h3>它能做什么</h3>
-  <ul>
-    <li><b>方向管理</b>：注册探索方向（如某个自媒体赛道），可冻结、归档，按方向记录投入的时间。</li>
-    <li><b>双账本</b>：记录支出 / 收入 / 转账，多账户 + 收支分类，流水可随时回溯；另有系统账户「api 钱包」直接对接 DeepSeek 余额。</li>
-    <li><b>目标计划</b>：目标（挂在方向下）→ 计划 → 子计划 三级结构，支持简称 / 全称 / 颜色，完成状态自动汇总进度条。</li>
-    <li><b>周期计划</b>：按周 / 按月重复的固定节奏（如每天晨读），设每日次数，支持逐日打卡。</li>
-    <li><b>待办</b>：轻量 checklist，随手记下要做的事。</li>
-    <li><b>日历日程</b>：年 / 月 / 周 / 日四种视图；计划可拖拽部署到某一天，设时间段（30 分钟粒度吸附），右键菜单改时间 / 简称 / 颜色 / 删除。</li>
-    <li><b>概览页</b>：今日时间与净额统计 + 今日计划清单，勾选完成即全视图同步（月视图绿点、周/日视图划线打勾）。</li>
-    <li><b>API 钱包</b>：DeepSeek 实时余额 + 当月用量（请求数 / token / 花费），60 秒缓存。</li>
-    <li><b>AI 工具层</b>：为 AI 注册 6 个工具（查状态、记账、转账、管理计划、看报表、查钱包），一句话即可操作整个工作台。</li>
-  </ul>
-
-  <h3>架构</h3>
-  <ul>
-    <li><b>后端（Host）</b>：Node.js 服务，`/explore/*` 路由处理方向 / 账户 / 分类 / 记账 / 转账 / 目标计划 / 周期计划 / 日历部署的增删改查；报表聚合（收支汇总、分类占比、方向投入、目标进度）前后端共用同一份实现。</li>
-    <li><b>前端（Client）</b>：浏览器侧边栏界面，五个页签（概览 / 方向 / 记账 / 日程 / 计划）+ 报表；自绘下拉、拖拽部署、时间轴拖拽、右键菜单全部原生 JS 实现。</li>
-    <li><b>数据</b>：本地 JSON 文件 + 追加式流水（JSONL），写入前自动备份（保留 50 份），路径可用环境变量覆盖。</li>
-  </ul>
-
-  <h3>技术栈</h3>
-  <p>
-    <span class="tag">Node.js</span><span class="tag">Cordis</span><span class="tag">原生 JS</span><span class="tag">无框架</span><span class="tag">本地 JSON 存储</span><span class="tag">拖拽交互</span><span class="tag">AI 工具</span><span class="tag">已开源 MIT</span>
-  </p>
+  </div>
 
   <p style="margin-top:36px;"><a class="btn" href="index.html">← 返回首页</a></p>
 

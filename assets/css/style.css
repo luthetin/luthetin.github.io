@@ -169,6 +169,22 @@ img { display:block; max-width:100%; }
 }
 .card2 .go:hover { background:var(--pink); color:#fff; }
 
+/* ---------------- 项目列表页（一个项目一个按钮） ---------------- */
+.plist { display:grid; grid-template-columns:1fr; gap:18px; margin:8px 0 44px; }
+.pcard {
+  display:block; background:var(--paper); border:1px solid var(--line); border-radius:12px;
+  padding:28px 30px; transition:transform .25s ease, box-shadow .25s ease, border-color .25s;
+}
+.pcard:hover { transform:translateY(-3px); box-shadow:0 10px 26px rgba(43,38,34,.07); border-color:var(--pink); }
+.pcard .k { font-family:var(--kai); font-size:21px; letter-spacing:5px; margin-bottom:8px; display:flex; align-items:center; gap:10px; }
+.pcard .k::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--pink); }
+.pcard .d { font-size:14px; color:var(--ink-2); line-height:1.85; margin-bottom:16px; }
+.pcard .go {
+  display:inline-block; border:1px solid var(--pink); color:var(--pink-d);
+  border-radius:999px; padding:7px 20px; font-size:13px; letter-spacing:3px; transition:all .2s;
+}
+.pcard:hover .go { background:var(--pink); color:#fff; }
+
 /* ---------------- 通用按钮 / 标签 ---------------- */
 .btn {
   display:inline-block; border:1px solid var(--ink); border-radius:999px;

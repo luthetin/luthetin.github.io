@@ -17,7 +17,8 @@
 
 - `index.html`     首页（照片 → 渐变 → 粉色卡片轮播佳句 + 三栏）
 - `poetry.html`    诗歌（春潋集选 + 行吟集选）
-- `projects.html`  程序（探索台项目详情）
+- `projects.html`  程序（项目列表：一个按钮一个项目）
+- `explore-hub.html`  探索台项目详情（从项目列表点进去）
 - `about.html`     关于（心路 + 信条）
 - `assets/`        样式、脚本、图片
 
