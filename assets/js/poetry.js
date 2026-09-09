@@ -120,6 +120,20 @@
     var box = document.createElement('div');
     box.className = 'expanded';
     box.innerHTML = html;
+    /* 译文/注释按钮：切换对应面板显隐 */
+    var btns = box.querySelectorAll('.xbtn');
+    for (var k = 0; k < btns.length; k++) {
+      (function(btn){
+        btn.addEventListener('click', function(){
+          var panel = box.querySelector('.xpanel[data-p="' + btn.getAttribute('data-x') + '"]');
+          if (!panel) return;
+          var willShow = panel.hidden;
+          panel.hidden = !willShow;
+          btn.setAttribute('aria-expanded', willShow ? 'true' : 'false');
+          btn.classList.toggle('on', willShow);
+        });
+      })(btns[k]);
+    }
     item.parentNode.insertBefore(box, item.nextSibling);
     openMap.set(item, box);
     allExpanded.push(box);
@@ -151,13 +165,25 @@
       html += '<span class="ln">' + esc(line) + '</span>';
     });
     html += '</div>';
-    /* 译文（有内容才显示，待补充） */
-    if (p.trans && p.trans.length) {
-      html += '<div class="extra"><div class="extra-h">译文</div><div class="extra-body">' + esc(p.trans) + '</div></div>';
-    }
-    /* 注释（有内容才显示，待补充） */
-    if (p.notes && p.notes.length) {
-      html += '<div class="extra"><div class="extra-h">注释</div><div class="extra-body">' + esc(p.notes) + '</div></div>';
+    /* 译文 / 注释：有内容时给按钮，点击才展开 */
+    var hasTrans = p.trans && (Array.isArray(p.trans) ? p.trans.length : p.trans.length > 0);
+    var hasNotes = p.notes && p.notes.length > 0;
+    if (hasTrans || hasNotes) {
+      html += '<div class="xbtns">';
+      if (hasTrans) html += '<button type="button" class="xbtn" data-x="trans" aria-expanded="false">译文</button>';
+      if (hasNotes) html += '<button type="button" class="xbtn" data-x="notes" aria-expanded="false">注释</button>';
+      html += '</div>';
+      if (hasTrans) {
+        html += '<div class="extra xpanel" data-p="trans" hidden><div class="extra-h">译文</div>';
+        var tr = Array.isArray(p.trans) ? p.trans : [p.trans];
+        tr.forEach(function(seg){ html += '<p class="extra-p">' + esc(seg) + '</p>'; });
+        html += '</div>';
+      }
+      if (hasNotes) {
+        html += '<div class="extra xpanel" data-p="notes" hidden><div class="extra-h">注释</div>';
+        html += '<p class="extra-p">' + esc(p.notes) + '</p>';
+        html += '</div>';
+      }
     }
     html += '</div>';
     return html;

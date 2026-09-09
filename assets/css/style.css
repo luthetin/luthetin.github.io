@@ -255,6 +255,23 @@ img { display:block; max-width:100%; }
 .expanded .poem { margin:18px 0 6px; }
 .expanded .essay { margin:18px 0 6px; }
 
+/* 译文 / 注释开关按钮 */
+.xbtns { text-align:center; margin:14px 0 2px; }
+.xbtn {
+  font-family:var(--kai); font-size:13px; letter-spacing:3px;
+  color:var(--pink-d); background:transparent;
+  border:1px solid var(--pink); border-radius:999px;
+  padding:4px 18px; margin:0 6px; cursor:pointer;
+  transition:all .2s;
+}
+.xbtn:hover { background:var(--pink-p); }
+.xbtn.on { background:var(--pink); color:#fff; }
+/* 译文/注释面板：默认 hidden，点按钮展开 */
+.expanded .extra { margin:8px 0 0; padding:10px 14px 12px; }
+.expanded .extra[hidden] { display:none; }
+.extra-p { font-size:14.5px; color:var(--ink-2); line-height:2; text-align:justify; margin:0 0 8px; }
+.extra-p:last-child { margin-bottom:0; }
+
 /* 返回目录 */
 .back { text-align:center; margin-top:44px; }
 #backToCat { font-family:var(--kai); letter-spacing:3px; }
@@ -344,4 +361,5 @@ img { display:block; max-width:100%; }
   .cat-item { font-size:16px; letter-spacing:1px; }
   .poem .body { font-size:14px; }
   .poem .t { font-size:19px; }
+  .xbtn { font-size:12px; letter-spacing:2px; padding:4px 12px; margin:0 3px; }
 }
