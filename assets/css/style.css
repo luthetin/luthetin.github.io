@@ -320,4 +320,28 @@ img { display:block; max-width:100%; }
   .hero .card .quote { min-height:110px; font-size:21px; }
   .nav-links { gap:16px; font-size:13px; }
   .nav .brand small { display:none; }
+
+  /* ---- 手机端：诗歌页适配 ---- */
+  .poem-section { padding:40px 16px 60px; }
+  .sec-title { font-size:24px; letter-spacing:8px; }
+  /* 诗集按钮：缩小到能在窄屏一行放下；内文字禁止折行，放不下时整行换排 */
+  .book-btns { gap:12px; flex-wrap:wrap; margin:32px 0 6px; }
+  .book-btn {
+    font-size:16px; letter-spacing:3px;
+    padding:10px 22px; white-space:nowrap;
+  }
+  .catalog { max-width:100%; margin:30px auto 0; }
+  .cat-item { font-size:17px; letter-spacing:1px; padding:10px 4px; }
+  .poem .t { font-size:21px; }
+  .poem .body { font-size:15px; line-height:2.15; }
+  .poem .note { font-size:12px; }
+  .essay { font-size:15.5px; line-height:2.1; }
+  .essay .h { font-size:18px; }
+}
+/* 超窄屏（老 iPhone / 小屏安卓 ≤340px）：进一步缩小字号，长句尽量单行 */
+@media (max-width:340px){
+  .book-btn { font-size:15px; letter-spacing:2px; padding:9px 16px; }
+  .cat-item { font-size:16px; letter-spacing:1px; }
+  .poem .body { font-size:14px; }
+  .poem .t { font-size:19px; }
 }
