@@ -6,7 +6,7 @@
 <title>程序 · 周新旭 — GeoStructure Builder</title>
 <meta name="description" content="周新旭的编程作品：GeoStructure Builder，一个单文件、离线可用的构造地质学建模工具，手写 WebGL，已开源。">
 <meta name="keywords" content="周新旭,GeoStructure Builder,构造地质学,地层建模,WebGL,开源,geostructure-builder">
-<link rel="stylesheet" href="assets/css/style.css?v=7">
+<link rel="stylesheet" href="assets/css/style.css?v=8">
 </head>
 <body>
 
@@ -34,6 +34,15 @@
     <a class="btn" href="https://luthetin.github.io/geostructure-builder/" target="_blank" rel="noopener">打开在线应用 →</a>
     <a class="btn" style="margin-left:10px;" href="https://github.com/luthetin/geostructure-builder" target="_blank" rel="noopener">GitHub 仓库</a>
   </p>
+
+  <h3>转着看看三个内置模型</h3>
+  <p>下面这个视图是现场算出来的：控制网 → 光滑曲面 → 按沉积次序叠起来，和 app 里是同一套算法（交线、等高线这些细节省掉了）。<b>拖动旋转、滚轮或双指缩放</b>，松手一会儿它会自己转。</p>
+
+  <div class="s3d">
+    <canvas id="strata3d" aria-label="三个内置地层模型的立体展示"></canvas>
+    <div class="s3d-bar"></div>
+    <div class="s3d-hint"></div>
+  </div>
 
   <h3>它在解决什么问题</h3>
   <ul>
@@ -83,5 +92,6 @@
   <div class="update">最后更新于 2026 年 9 月</div>
 </footer>
 
+<script src="assets/js/strata-viewer.js?v=1" defer></script>
 </body>
 </html>
