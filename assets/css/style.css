@@ -363,3 +363,90 @@ img { display:block; max-width:100%; }
   .poem .t { font-size:19px; }
   .xbtn { font-size:12px; letter-spacing:2px; padding:4px 12px; margin:0 3px; }
 }
+
+/* ============================================================
+   v7 精修（2026-09）
+   ------------------------------------------------------------
+   只做加法：不推翻原来的设计语言（黑白极简 + 桃花粉 + 楷体），
+   集中打磨「项目详情页」的可读性与链接/按钮手感，
+   以及选中文字、键盘聚焦这类平时没人注意、但很影响质感的小地方。
+   ============================================================ */
+
+/* 选中文字也用主题色 */
+::selection { background:var(--pink-p); color:var(--ink); }
+
+/* 键盘聚焦看得见（鼠标点击不会出现），兼顾无障碍与质感 */
+a:focus-visible, button:focus-visible {
+  outline:2px solid var(--pink); outline-offset:3px; border-radius:4px;
+}
+
+/* 底色加一层极淡的暖色光晕，白纸不再死平（几乎看不出，只是"活"了一点） */
+body {
+  background:
+    radial-gradient(900px 520px at 12% -8%, #fff6f3, transparent 62%),
+    radial-gradient(760px 460px at 100% 0%, #fdf1f4, transparent 58%),
+    var(--bg);
+  background-attachment:fixed;
+}
+
+/* ---------------- 项目详情页：正文更好读 ---------------- */
+.proj h1 { position:relative; padding-bottom:12px; }
+.proj h1::after {
+  content:""; position:absolute; left:0; bottom:0; width:52px; height:3px;
+  border-radius:3px; background:linear-gradient(90deg,var(--pink),var(--pink-p));
+}
+/* 小节标题加一枚粉色小方点，和首页卡片的圆点呼应 */
+.proj h3 { display:flex; align-items:center; gap:9px; letter-spacing:2px; }
+.proj h3::before {
+  content:""; width:7px; height:7px; border-radius:2px; transform:rotate(45deg);
+  background:var(--pink); flex:0 0 auto;
+}
+.proj ul { list-style:none; padding-left:0; }
+.proj ul li { position:relative; padding-left:20px; }
+.proj ul li::before {
+  content:""; position:absolute; left:4px; top:.78em;
+  width:5px; height:5px; border-radius:50%;
+  background:var(--pink-p); box-shadow:inset 0 0 0 1px var(--pink);
+}
+/* 正文里的链接：平时一条淡底线，hover 才亮起来 */
+.proj p a, .proj li a {
+  color:var(--pink-d); border-bottom:1px solid var(--pink-p); padding-bottom:1px;
+  transition:border-color .2s, color .2s;
+}
+.proj p a:hover, .proj li a:hover { border-bottom-color:var(--pink-d); }
+/* 行内的代码 / 文件名 */
+.proj code {
+  font-family:ui-monospace,Consolas,"Courier New",monospace; font-size:.92em;
+  background:#f5efe9; border:1px solid var(--line); border-radius:5px; padding:1px 6px;
+}
+
+/* ---------------- 按钮与标签的手感 ---------------- */
+.btn { transition:background .2s, color .2s, transform .12s, box-shadow .2s; }
+.btn:hover { box-shadow:0 6px 16px rgba(43,38,34,.12); }
+.btn:active { transform:translateY(1px); box-shadow:none; }
+/* 详情页顶部那两颗主按钮（在线工具 / 代码仓库）用粉色，比"返回"更抢眼 */
+.proj .btn[href*="geostructure-builder"],
+.proj .btn[href*="explore-hub"] { border-color:var(--pink); color:var(--pink-d); }
+.proj .btn[href*="geostructure-builder"]:hover,
+.proj .btn[href*="explore-hub"]:hover { background:var(--pink); color:#fff; }
+
+.tag { transition:background .2s, border-color .2s, color .2s; }
+.tag:hover { background:var(--pink-p); border-color:var(--pink); color:var(--pink-d); }
+
+/* ---------------- 卡片：纸感更细一点 ---------------- */
+.card2, .pcard { background:linear-gradient(180deg,#fffefd,var(--paper)); }
+.pcard { position:relative; overflow:hidden; }
+/* 悬停时左侧亮起一条粉色边 */
+.pcard::before {
+  content:""; position:absolute; left:0; top:14px; bottom:14px; width:0;
+  border-radius:0 3px 3px 0; background:var(--pink); transition:width .22s ease;
+}
+.pcard:hover::before { width:3px; }
+/* 按钮文字里本来就写了“→”，所以【不】用 ::after 再补一个箭头（那样会重复），
+   改成 hover 时整颗按钮轻微右移。 */
+.card2 .go, .pcard .go { transition:all .2s, transform .18s ease; }
+.card2:hover .go, .pcard:hover .go { transform:translateX(3px); }
+
+/* ---------------- 页脚：收一下留白 ---------------- */
+.footer { margin-top:72px; }
+.footer .fl a { border-bottom-style:dashed; }
