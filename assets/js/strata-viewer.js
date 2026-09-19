@@ -49,7 +49,6 @@
   var N = 34;                       // 每边 N 段（地层与剖面用，够光滑也不重）
   var STEP = N + 1;                 // 每边点数
   var NC = 68;                      // 地表的细分格：露头带的分界要细，不然是台阶
-  var CSTEP = NC + 1;
   var CU = 24, CST = CU + 1;        // 算"压住"用的粗网格
 
   function buildModel(P) {
@@ -235,71 +234,110 @@
       }
       return parts;
     }
-    var c4 = [[0, 0], [1, 0], [1, 1], [0, 1]];
 
     /* 地表：按露头带上色，并且【沿真实交线切开】。
 
-       带号的判据必须与 app 的 exposedBandXYZ 逐字一致，否则就是错的。
-       app 那句是："自下而上的地层里，地表正好落在它区间内（z_k ≤ 地表 ≤ z_{k+1}）的
-       【最上面那一层】"。注意：有些地方会有【两层同时命中】（下伏褶皱层的顶面
-       和上覆层的底面都把地表夹住了），这时 app 取更年轻的那一层。
-       我一开始写成"数有几张界面低于地表"，在 (3,3) 这类点上会得到 12，
-       而 app 说是 24 —— 一眼就差了 12 个带号，表露面上当然一片错乱。
+       带号的判据必须与 app 的 exposedBandXYZ 逐字一致：
+       "地表正好落在它区间内（z_k ≤ 地表 ≤ z_{k+1}）的【最上面那一层】"。
+       有些地方会【两层同时命中】（下伏褶皱层的顶面与上覆层的底面都把地表夹住），
+       那时 app 取更年轻的那层 —— 我一开始写成"数有几张界面低于地表"，
+       在格点(3,3) 得到 12 而 app 是 24，整幅表露面全乱。
 
-       所以这里改成 app 的写法：给每一层定义一个"它是不是那个命中层"的场
-       hit_k = min(地表 − z_k, z_{k+1} − 地表)（≥0 意味着地表夹在它中间），
-       取【最大的那个 k】。切开的分界于是只可能是某个 hit_k 的零线。 */
-    function hitField(k5, q00, q10, q01, q11, x0, y0) {
-      var a1 = Z[lid][q00] - Z[k5][q00], b1 = Z[k5 + 1][q00] - Z[lid][q00];
-      var a2 = Z[lid][q10] - Z[k5][q10], b2 = Z[k5 + 1][q10] - Z[lid][q10];
-      var a3 = Z[lid][q01] - Z[k5][q01], b3 = Z[k5 + 1][q01] - Z[lid][q01];
-      var a4 = Z[lid][q11] - Z[k5][q11], b4 = Z[k5 + 1][q11] - Z[lid][q11];
-      var h1 = Math.min(a1, b1), h2 = Math.min(a2, b2), h3 = Math.min(a3, b3), h4 = Math.min(a4, b4);
-      return function (zpt) {
-        var fx = Math.min(1, Math.max(0, zpt[0] - x0)), fy = Math.min(1, Math.max(0, zpt[1] - y0));
-        return (h1 * (1 - fx) + h2 * fx) * (1 - fy) + (h3 * (1 - fx) + h4 * fx) * fy;
-      };
+       切法：一圈一圈地"抠"。从最年轻的层往下试 k，把多边形里属于第 k 层的那部分
+       抠出来（就是同时满足 z_k ≤ 地表 与 地表 ≤ z_{k+1} 的部分），剩下的继续往下试。
+       这两条判据各自都是【一个光滑场】（z_k − 地表 / z_{k+1} − 地表），
+       沿格边线性插值求零点足够准 —— 所以边界落在真实交线上，不是格子的台阶。
+
+       ⚠ 千万别去插值 min(z_k − 地表, z_{k+1} − 地表)：那个 min 有折角、格内不是双线性的，
+       实测在格点上能差 96 m，切出来的边界反而更错、还凭空长出带号（24 vs app 的 23）。 */
+    function bilin(Za, x, y) {
+      /* (x,y) 是世界坐标（-0.5..0.5），换算成渲染网格的分数坐标后双线性取值 */
+      var fxx = (x + 0.5) * N, fyy = (y + 0.5) * N;
+      fxx = Math.min(N - 1e-9, Math.max(0, fxx)); fyy = Math.min(N - 1e-9, Math.max(0, fyy));
+      var ix = Math.floor(fxx), iy = Math.floor(fyy), tx = fxx - ix, ty = fyy - iy;
+      var q0 = iy * STEP + ix;
+      return (Za[q0] * (1 - tx) + Za[q0 + 1] * tx) * (1 - ty)
+           + (Za[q0 + STEP] * (1 - tx) + Za[q0 + STEP + 1] * tx) * ty;
     }
-    /* 地表那一层的细分网格：露头带的分界靠它变细。
-       为什么不做"把格子沿交线切开"：交线是 hit_k = min(地表−z_k, z_{k+1}−地表) 的零线，
-       而 hit_k 是【两个线性场取 min】—— 它在格内不是双线性的（有个折角），
-       用格角的 hit 值做双线性插值去求零点，实测在 (18,21) 那种格子边上的点上
-       会差 96 m，切出来的边界反而更错、还会凭空长出带号（24 vs app 的 23）。
-       与其插值一个不光滑的场，不如把网格本身做细：68×68 之后一个子格 ≈ 5 像素，
-       台阶细到看不见，而每个子格用【它自己的重心】按 app 的规则定带号，绝对准确。 */
-    var CZ = [];
-    for (i = 0; i < nf; i++) CZ.push(new Float32Array(CSTEP * CSTEP));
-    for (y = 0; y < CSTEP; y++) for (x = 0; x < CSTEP; x++) {
-      evalField(P.z, res, x / NC, y / NC, v);
-      q = y * CSTEP + x;
-      for (i = 0; i < nf; i++) CZ[i][q] = v[i];
-    }
-    var capPieces = 0, capTris = 0, capCells = 0, capSplit = 0, capDrop = 0, capBandMin = 99, capBandMax = -1, capArea = 0, capDropArea = 0;
-    var capStepW = 1 / NC;                          // 子格在世界单位里的宽度
-    for (y = 0; y < NC; y++) for (x = 0; x < NC; x++) {
-      var c00 = y * CSTEP + x, c10 = c00 + 1, c01 = c00 + CSTEP, c11 = c01 + 1;
-      var fx = 0.5, fy = 0.5;                       // 取子格重心
-      var zsC = (CZ[lid][c00] + CZ[lid][c10] + CZ[lid][c01] + CZ[lid][c11]) / 4;
-      /* 带号 = 【最大的那个命中层】（与 app 的 exposedBandXYZ 逐字一致） */
-      var bb = 0;
-      for (i = 0; i < ns; i++) {
-        var zk = (CZ[i][c00] + CZ[i][c10] + CZ[i][c01] + CZ[i][c11]) / 4;
-        var zk1 = (CZ[i+1][c00] + CZ[i+1][c10] + CZ[i+1][c01] + CZ[i+1][c11]) / 4;
-        if (zk <= zsC + 1e-3 && zsC <= zk1 + 1e-3) bb = i + 1;
+    function bandAtXY(x, y) {
+      var zs = bilin(Z[lid], x, y), bb = 0;
+      for (var k = 0; k < ns; k++) {
+        if (bilin(Z[k], x, y) <= zs + 1e-3 && zs <= bilin(Z[k + 1], x, y) + 1e-3) bb = k + 1;
       }
+      return bb;
+    }
+    function centroid(P2) {
+      var sx = 0, sy = 0;
+      for (var t = 0; t < P2.length; t++) { sx += P2[t][0]; sy += P2[t][1]; }
+      return [sx / P2.length, sy / P2.length];
+    }
+    /* 按场 f 的符号切：want = +1 留 f≥0 的那半，-1 留 f≤0 的那半 */
+    function halfPlane(P2, f, want) {
+      var out = [], m = P2.length;
+      for (var t = 0; t < m; t++) {
+        var p = P2[t], r = P2[(t + 1) % m];
+        var gp = f(p[0], p[1]), gr = f(r[0], r[1]);
+        if (want > 0 ? (gp >= 0) : (gp <= 0)) out.push(p);
+        if ((gp > 0 && gr < 0) || (gp < 0 && gr > 0)) {
+          var tt = gp / (gp - gr);
+          out.push([p[0] + (r[0] - p[0]) * tt, p[1] + (r[1] - p[1]) * tt]);
+        }
+      }
+      return out.length >= 3 ? out : null;
+    }
+    function emitPiece(P2, band) {
+      if (!P2 || P2.length < 3) return;
+      if (band <= 0 || !P.strataVis[band - 1]) return;
+      var cc = CL[band - 1];
+      var pts3 = P2.map(function (p) { return [p[0], p[1], (bilin(Z[lid], p[0], p[1]) - lo) / span * HZ]; });
+      for (var i8 = 1; i8 < pts3.length - 1; i8++) { tri3(pts3[0], pts3[i8], pts3[i8 + 1], cc); capTris++; }
+      capPieces++;
+    }
+    var capPieces = 0, capTris = 0, capCells = 0, capBandMin = 99, capBandMax = -1;
+    var capStepW = 1 / N;
+    for (y = 0; y < N; y++) for (x = 0; x < N; x++) {
       capCells++;
-      if (bb < capBandMin) capBandMin = bb;
-      if (bb > capBandMax) capBandMax = bb;
-      var cc2 = (bb <= 0 || !P.strataVis[bb - 1]) ? null : CL[bb - 1];
-      var ar2 = capStepW * capStepW;
-      if (!cc2) { capDrop++; capDropArea += ar2; continue; }
-      capArea += ar2;
-      /* 子格四角的世界坐标与高程 */
-      var X0 = (x / NC - 0.5), Y0 = (y / NC - 0.5), X1 = X0 + capStepW, Y1 = Y0 + capStepW;
-      var zc = function (c) { return (CZ[lid][c] - lo) / span * HZ; };
-      quad([X0, Y0, zc(c00)], [X1, Y0, zc(c10)], [X1, Y1, zc(c11)], [X0, Y1, zc(c01)], cc2);
-      capTris += 2; capPieces++;
-      void fx; void fy;
+      var X0 = x / N - 0.5, Y0 = y / N - 0.5, X1 = X0 + capStepW, Y1 = Y0 + capStepW;
+      /* 一圈：从最年轻的层往下抠，抠出来的每一块同色，剩下的继续往下 */
+      var rest = [[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]];
+      for (var k2 = ns - 1; k2 >= 0 && rest && rest.length >= 3; k2--) {
+        var c0 = centroid(rest);
+        var kept = CL[k2];
+        /* 这一块的重心属不属于第 k2 层？不属于就跳过（省掉大部分切开操作） */
+        var zsc = bilin(Z[lid], c0[0], c0[1]);
+        var inBand = bilin(Z[k2], c0[0], c0[1]) <= zsc + 1e-3 && zsc <= bilin(Z[k2 + 1], c0[0], c0[1]) + 1e-3;
+        if (!inBand) continue;
+        var fLo = (function (kk) { return function (fx, fy) { return bilin(Z[kk], fx, fy) - bilin(Z[lid], fx, fy); }; })(k2);
+        var fHi = (function (kk) { return function (fx, fy) { return bilin(Z[lid], fx, fy) - bilin(Z[kk + 1], fx, fy); }; })(k2);
+        /* 先抠出"地表 ≥ z_k"的部分，再从里面抠出"地表 ≤ z_{k+1}"的部分 */
+        var A1 = halfPlane(rest, fLo, +1);
+        var Inn = A1 ? halfPlane(A1, fHi, +1) : null;
+        if (Inn) {
+          emitPiece(Inn, k2 + 1);
+          if (k2 + 1 < capBandMin) capBandMin = k2 + 1;
+          if (k2 + 1 > capBandMax) capBandMax = k2 + 1;
+          /* 剩下的 = 原块减去这一块 */
+          var fAll = function (fx, fy) {
+            return Math.min(bilin(Z[k2], fx, fy) - bilin(Z[lid], fx, fy),
+                            bilin(Z[lid], fx, fy) - bilin(Z[k2 + 1], fx, fy));
+          };
+          var RestA = halfPlane(rest, fLo, -1);
+          var OutHi = A1 ? halfPlane(A1, fHi, -1) : null;
+          rest = RestA;
+          if (OutHi) {
+            /* A1 里不属于本层的那半也要留着继续往下试；两块都塞进待处理清单 */
+            if (!rest) rest = OutHi;
+            else rest = rest.concat(OutHi);
+          }
+        }
+      }
+      /* 兜底：剩下的（含边界外/数值毛刺）按重心直接定带号 */
+      if (rest && rest.length >= 3) {
+        var cR = centroid(rest);
+        var bR = bandAtXY(cR[0], cR[1]);
+        emitPiece(rest, bR);
+        if (bR > 0) { if (bR < capBandMin) capBandMin = bR; if (bR > capBandMax) capBandMax = bR; }
+      }
     }
     /* 各层顶面：只在该层存在、且没被更年轻的压住的地方画。
        判据直接用 app 的场：第 i 张面在 z 处的场 = min(CULL_i − z, 本层厚度)，
@@ -368,8 +406,7 @@
 
     return { pos: new Float32Array(pos), nrm: new Float32Array(nrm), col: new Float32Array(col),
              count: pos.length / 3, xyz: new Float32Array(pos), Z: Z, mask: M, band: band,
-             capPieces: capPieces, capTris: capTris, capCells: capCells, capSplit: capSplit,
-             capDrop: capDrop, capBandMin: capBandMin, capBandMax: capBandMax, capArea: capArea, capDropArea: capDropArea };
+             capPieces: capPieces, capTris: capTris, capCells: capCells, capBandMin: capBandMin, capBandMax: capBandMax };
   }
 
   /* ---------- 3. 最小 WebGL ---------- */
