@@ -46,8 +46,10 @@
   }
 
   /* ---------- 2. 把预设编译成能直接画的三角形 ---------- */
-  var N = 34;                       // 每边 N 段（展示用，够光滑也不重）
+  var N = 34;                       // 每边 N 段（地层与剖面用，够光滑也不重）
   var STEP = N + 1;                 // 每边点数
+  var NC = 68;                      // 地表的细分格：露头带的分界要细，不然是台阶
+  var CSTEP = NC + 1;
   var CU = 24, CST = CU + 1;        // 算"压住"用的粗网格
 
   function buildModel(P) {
@@ -87,11 +89,8 @@
       }
     }
 
-    /* 2.2 渲染网格上的高程场；顺便在同一个循环里算出 app 那条规则的场
-           F_i = min(上面那些界面的软最小值, 上面那些界面的硬最小) − z_i。
-           有了 F 和 Z，任何一点的"场"都能精确还原：
-             第 i 张面在 z 处的场 = min(F_i − z, Z_i − z)，
-           而 CULL_i = F_i + Z_i 就是"该面被压到看不见的那个高程"。 */
+    /* 2.2 渲染网格上的高程场（外圈循环按点走，里面一次性把 nf 个场都取出来；
+           顺序反过来会对同一个点反复算样条，慢好几倍）。 */
     var Z = [];
     for (i = 0; i < nf; i++) Z.push(new Float32Array(STEP * STEP));
     var CULL = [];
@@ -100,6 +99,8 @@
       evalField(P.z, res, x / N, y / N, v);
       q = y * STEP + x;
       for (i = 0; i < nf; i++) Z[i][q] = v[i];
+      /* app 那条规则的场：F_i = min(上面那些界面的软最小值, 上面那些界面的硬最小) − z_i，
+         CULL_i = F_i + z_i 就是"第 i 张面被压到看不见的那个高程" */
       var zmin2 = Infinity;
       for (i = 0; i < nf; i++) if (v[i] < zmin2) zmin2 = v[i];
       var run2 = 0, runMin2 = Infinity;
@@ -112,6 +113,13 @@
         if (v[i] < runMin2) runMin2 = v[i];
       }
     }
+    /* 2.2b 【地表的露头带要沿真实交线切开】
+           原来是一格一个颜色（取格子角上的带号），于是带的分界线就是格子的台阶 ——
+           在 380×300 的画布上一格才几个像素，看着全是锯齿。
+           app 的做法是：把跨带的格子沿 (界面 − 地表) = 0 那条交线切开，每块各自同色。
+           这里照做：对每个界面 k，用它的场 g = Z_k − Z_地表 把格子切成 g≥0 / g≤0 两块，
+           交点在格边上线性插值（场在格内是双线性的，线性插值已经足够贴）。
+           切完每块按重心定带号，颜色边界就落在真实交线上。 */
     var M = [];
     for (i = 0; i < nf; i++) {
       var m = new Float32Array(STEP * STEP);
@@ -161,6 +169,19 @@
         col.push(cc[0], cc[1], cc[2]);
       }
     }
+    /* 一个三角形（a→b→c 从外侧看逆时针），法线由两条边叉乘得 */
+    function tri3(a, b, c, cc) {
+      var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      var vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      var l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+      var tri = [a, b, c];
+      for (var t = 0; t < 3; t++) {
+        pos.push(tri[t][0], tri[t][1], tri[t][2]);
+        nrm.push(nx, ny, nz);
+        col.push(cc[0], cc[1], cc[2]);
+      }
+    }
     /* 画第 i 张面的一个格子；ok(q) 返回颜色或 null（不画） */
     function cell(i2, x2, y2, ok) {
       var q00 = y2 * STEP + x2, q10 = q00 + 1, q01 = q00 + STEP, q11 = q01 + 1;
@@ -170,13 +191,115 @@
            [PX(x2 + 1), PX(y2 + 1), PZ(i2, q11)], [PX(x2), PX(y2 + 1), PZ(i2, q01)], cc);
     }
 
-    /* 地表：按露头带上色 */
-    for (y = 0; y < N; y++) for (x = 0; x < N; x++) {
-      cell(lid, x, y, function (q00) {
-        var b = band[q00];
-        if (b <= 0 || !P.strataVis[b - 1]) return null;
-        return CL[b - 1];
-      });
+    /* 用一串"场"把格子（凸多边形）切成若干块：每块内部的符号组合一致。
+       交点在边的两端之间线性插值（场在格内是双线性的，这样已经贴得住）。
+       返回 [{pts, signs}]，signs 是这一块在该序号场上的符号。 */
+    function splitCell(pts, fields, nF) {
+      var parts = [{ pts: pts, sg: pts.map(function () { return []; }) }];
+      for (var fi = 0; fi < nF; fi++) {
+        var fld = fields[fi], out = [];
+        for (var pi = 0; pi < parts.length; pi++) {
+          var Q = parts[pi].pts, S = parts[pi].sg, m = Q.length;
+          var hasP = false, hasN = false;
+          for (var i3 = 0; i3 < m; i3++) {
+            var g3 = fld(Q[i3][2]);
+            if (g3 > 0) hasP = true; else if (g3 < 0) hasN = true;
+          }
+          if (!hasP || !hasN) {                    // 这一刀没穿过：原样留着，只把符号补齐
+            var keepSg = [];
+            for (var i5 = 0; i5 < m; i5++) {
+              var g5 = fld(Q[i5][2]);
+              keepSg.push(S[i5].concat([g5 > 0 ? 1 : (g5 < 0 ? -1 : 0)]));
+            }
+            out.push({ pts: Q, sg: keepSg });
+            continue;
+          }
+          var A = [], B = [], sA = [], sB = [];
+          for (var i4 = 0; i4 < m; i4++) {
+            var p = Q[i4], r = Q[(i4 + 1) % m];
+            var gp = fld(p[2]), gr = fld(r[2]);
+            if (gp >= 0) { A.push(p); sA.push(S[i4].concat([gp > 0 ? 1 : 0])); }
+            if (gp <= 0) { B.push(p); sB.push(S[i4].concat([gp < 0 ? -1 : 0])); }
+            if ((gp > 0 && gr < 0) || (gp < 0 && gr > 0)) {
+              var tt = gp / (gp - gr);
+              var mid = [p[0] + (r[0] - p[0]) * tt, p[1] + (r[1] - p[1]) * tt,
+                         p[2] + (r[2] - p[2]) * tt];
+              A.push(mid); sA.push(S[i4].concat([0]));
+              B.push(mid); sB.push(S[i4].concat([0]));
+            }
+          }
+          if (A.length >= 2) out.push({ pts: A, sg: sA });
+          if (B.length >= 2) out.push({ pts: B, sg: sB });
+        }
+        parts = out;
+      }
+      return parts;
+    }
+    var c4 = [[0, 0], [1, 0], [1, 1], [0, 1]];
+
+    /* 地表：按露头带上色，并且【沿真实交线切开】。
+
+       带号的判据必须与 app 的 exposedBandXYZ 逐字一致，否则就是错的。
+       app 那句是："自下而上的地层里，地表正好落在它区间内（z_k ≤ 地表 ≤ z_{k+1}）的
+       【最上面那一层】"。注意：有些地方会有【两层同时命中】（下伏褶皱层的顶面
+       和上覆层的底面都把地表夹住了），这时 app 取更年轻的那一层。
+       我一开始写成"数有几张界面低于地表"，在 (3,3) 这类点上会得到 12，
+       而 app 说是 24 —— 一眼就差了 12 个带号，表露面上当然一片错乱。
+
+       所以这里改成 app 的写法：给每一层定义一个"它是不是那个命中层"的场
+       hit_k = min(地表 − z_k, z_{k+1} − 地表)（≥0 意味着地表夹在它中间），
+       取【最大的那个 k】。切开的分界于是只可能是某个 hit_k 的零线。 */
+    function hitField(k5, q00, q10, q01, q11, x0, y0) {
+      var a1 = Z[lid][q00] - Z[k5][q00], b1 = Z[k5 + 1][q00] - Z[lid][q00];
+      var a2 = Z[lid][q10] - Z[k5][q10], b2 = Z[k5 + 1][q10] - Z[lid][q10];
+      var a3 = Z[lid][q01] - Z[k5][q01], b3 = Z[k5 + 1][q01] - Z[lid][q01];
+      var a4 = Z[lid][q11] - Z[k5][q11], b4 = Z[k5 + 1][q11] - Z[lid][q11];
+      var h1 = Math.min(a1, b1), h2 = Math.min(a2, b2), h3 = Math.min(a3, b3), h4 = Math.min(a4, b4);
+      return function (zpt) {
+        var fx = Math.min(1, Math.max(0, zpt[0] - x0)), fy = Math.min(1, Math.max(0, zpt[1] - y0));
+        return (h1 * (1 - fx) + h2 * fx) * (1 - fy) + (h3 * (1 - fx) + h4 * fx) * fy;
+      };
+    }
+    /* 地表那一层的细分网格：露头带的分界靠它变细。
+       为什么不做"把格子沿交线切开"：交线是 hit_k = min(地表−z_k, z_{k+1}−地表) 的零线，
+       而 hit_k 是【两个线性场取 min】—— 它在格内不是双线性的（有个折角），
+       用格角的 hit 值做双线性插值去求零点，实测在 (18,21) 那种格子边上的点上
+       会差 96 m，切出来的边界反而更错、还会凭空长出带号（24 vs app 的 23）。
+       与其插值一个不光滑的场，不如把网格本身做细：68×68 之后一个子格 ≈ 5 像素，
+       台阶细到看不见，而每个子格用【它自己的重心】按 app 的规则定带号，绝对准确。 */
+    var CZ = [];
+    for (i = 0; i < nf; i++) CZ.push(new Float32Array(CSTEP * CSTEP));
+    for (y = 0; y < CSTEP; y++) for (x = 0; x < CSTEP; x++) {
+      evalField(P.z, res, x / NC, y / NC, v);
+      q = y * CSTEP + x;
+      for (i = 0; i < nf; i++) CZ[i][q] = v[i];
+    }
+    var capPieces = 0, capTris = 0, capCells = 0, capSplit = 0, capDrop = 0, capBandMin = 99, capBandMax = -1, capArea = 0, capDropArea = 0;
+    var capStepW = 1 / NC;                          // 子格在世界单位里的宽度
+    for (y = 0; y < NC; y++) for (x = 0; x < NC; x++) {
+      var c00 = y * CSTEP + x, c10 = c00 + 1, c01 = c00 + CSTEP, c11 = c01 + 1;
+      var fx = 0.5, fy = 0.5;                       // 取子格重心
+      var zsC = (CZ[lid][c00] + CZ[lid][c10] + CZ[lid][c01] + CZ[lid][c11]) / 4;
+      /* 带号 = 【最大的那个命中层】（与 app 的 exposedBandXYZ 逐字一致） */
+      var bb = 0;
+      for (i = 0; i < ns; i++) {
+        var zk = (CZ[i][c00] + CZ[i][c10] + CZ[i][c01] + CZ[i][c11]) / 4;
+        var zk1 = (CZ[i+1][c00] + CZ[i+1][c10] + CZ[i+1][c01] + CZ[i+1][c11]) / 4;
+        if (zk <= zsC + 1e-3 && zsC <= zk1 + 1e-3) bb = i + 1;
+      }
+      capCells++;
+      if (bb < capBandMin) capBandMin = bb;
+      if (bb > capBandMax) capBandMax = bb;
+      var cc2 = (bb <= 0 || !P.strataVis[bb - 1]) ? null : CL[bb - 1];
+      var ar2 = capStepW * capStepW;
+      if (!cc2) { capDrop++; capDropArea += ar2; continue; }
+      capArea += ar2;
+      /* 子格四角的世界坐标与高程 */
+      var X0 = (x / NC - 0.5), Y0 = (y / NC - 0.5), X1 = X0 + capStepW, Y1 = Y0 + capStepW;
+      var zc = function (c) { return (CZ[lid][c] - lo) / span * HZ; };
+      quad([X0, Y0, zc(c00)], [X1, Y0, zc(c10)], [X1, Y1, zc(c11)], [X0, Y1, zc(c01)], cc2);
+      capTris += 2; capPieces++;
+      void fx; void fy;
     }
     /* 各层顶面：只在该层存在、且没被更年轻的压住的地方画。
        判据直接用 app 的场：第 i 张面在 z 处的场 = min(CULL_i − z, 本层厚度)，
@@ -244,7 +367,9 @@
     }
 
     return { pos: new Float32Array(pos), nrm: new Float32Array(nrm), col: new Float32Array(col),
-             count: pos.length / 3, xyz: new Float32Array(pos), Z: Z, mask: M, band: band };
+             count: pos.length / 3, xyz: new Float32Array(pos), Z: Z, mask: M, band: band,
+             capPieces: capPieces, capTris: capTris, capCells: capCells, capSplit: capSplit,
+             capDrop: capDrop, capBandMin: capBandMin, capBandMax: capBandMax, capArea: capArea, capDropArea: capDropArea };
   }
 
   /* ---------- 3. 最小 WebGL ---------- */
