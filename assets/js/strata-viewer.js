@@ -173,14 +173,31 @@
       var A = per[tt], B = per[tt + 1];
       var qa = A[1] * STEP + A[0], qb = B[1] * STEP + B[0];
       var xa = PX(A[0]), ya = PX(A[1]), xb = PX(B[0]), yb = PX(B[1]);
-      /* 最下面那张界面到地面：基底 */
-      var za = PZ(0, qa), zb = PZ(0, qb);
-      quad([xa, ya, FLOOR], [xb, yb, FLOOR], [xb, yb, zb], [xa, ya, za], CB);
+      /* 【剖面也要服从沉积次序规则】——和 app 里一样：
+         只画到"该柱上所有更年轻界面里最低的那一个"为止（Cmin），再往上被年轻岩层占住了。
+         少了这一步，各层的整张侧壁会一块压一块地叠在一起（就是之前那版的样子）。
+         Cmin 用硬 min；只取两个端点各自的 Cmin 再线性过渡，够用。 */
+      /* 基底：地面 → 第 1 张界面；上界同样是 Cmin（比第 1 张更年轻的最低者），
+         绝不能超过它，否则基底侧壁会盖到年轻岩层上。
+         lid ≥ 2 时界面 0 不是唯一的最低者，所以 c1/c2 从【界面 1】开始取。 */
+      var c1 = PZ(1, qa), c2 = PZ(1, qb), i0;
+      if (lid >= 2) for (i0 = 2; i0 < lid; i0++) {
+        var zz1 = PZ(i0, qa), zz2 = PZ(i0, qb);
+        if (zz1 < c1) c1 = zz1;
+        if (zz2 < c2) c2 = zz2;
+      }
+      if (c1 < PZ(0, qa)) c1 = PZ(0, qa);
+      if (c2 < PZ(0, qb)) c2 = PZ(0, qb);
+      quad([xa, ya, FLOOR], [xb, yb, FLOOR], [xb, yb, c2], [xa, ya, c1], CB);
       for (var k3 = 0; k3 < ns; k3++) {
         if (!P.strataVis[k3]) continue;
-        var b1 = PZ(k3, qa), b2 = PZ(k3, qb), t1 = PZ(k3 + 1, qa), t2 = PZ(k3 + 1, qb);
-        if ((t1 - b1) <= 1e-6 && (t2 - b2) <= 1e-6) continue;
-        quad([xa, ya, b1], [xb, yb, b2], [xb, yb, t2], [xa, ya, t1], CL[k3]);
+        var bot1 = PZ(k3, qa), bot2 = PZ(k3, qb);
+        var top1 = PZ(k3 + 1, qa), top2 = PZ(k3 + 1, qb);
+        if ((top1 - bot1) <= 1e-6 && (top2 - bot2) <= 1e-6) continue;   // 这一层在这里尖灭了
+        var e1 = Math.min(top1, c1), e2 = Math.min(top2, c2);
+        if (e1 - bot1 <= 1e-6 && e2 - bot2 <= 1e-6) continue;           // 整段都被压住了
+        quad([xa, ya, bot1], [xb, yb, bot2], [xb, yb, Math.max(bot2, e2)],
+             [xa, ya, Math.max(bot1, e1)], CL[k3]);
       }
     }
     /* 底面 */
@@ -190,7 +207,7 @@
     }
 
     return { pos: new Float32Array(pos), nrm: new Float32Array(nrm), col: new Float32Array(col),
-             count: pos.length / 3 };
+             count: pos.length / 3, xyz: new Float32Array(pos), Z: Z, mask: M, band: band };
   }
 
   /* ---------- 3. 最小 WebGL ---------- */
@@ -231,7 +248,7 @@
       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
       return b;
     }
-    return { p: mk(m.pos), n: mk(m.nrm), c: mk(m.col), count: m.count };
+    return { p: mk(m.pos), n: mk(m.nrm), c: mk(m.col), count: m.count, xyz: m.pos };
   }
 
   /* ---------- 4. 相机与交互 ---------- */
@@ -342,77 +359,58 @@
       return [fh * vx / d, f * vy / d];
     };
   }
-  function ndcBox(pts, D, target, az, aspect) {
-    var ce = Math.cos(ELEV), se = Math.sin(ELEV);
-    var eye = [target[0] + D * ce * Math.sin(az),
-               target[1] - D * ce * Math.cos(az),
-               target[2] + D * se];
-    var pr = makeProj(eye, target, aspect);
-    var x0 = 9, x1 = -9, y0 = 9, y1 = -9;
-    for (var i = 0; i < pts.length; i += 3) {
-      var s = pr(pts[i], pts[i + 1], pts[i + 2]);
-      if (!s) return null;
-      if (s[0] < x0) x0 = s[0]; if (s[0] > x1) x1 = s[0];
-      if (s[1] < y0) y0 = s[1]; if (s[1] > y1) y1 = s[1];
+  /* 【取景】比的是【真实几何】，不是控制网上的采样点。
+     坑：侧壁修好之后几何的下缘变了（底板的四个角），而取景还在按控制网估，
+     于是模型偏在画面下半边（实测竖直偏心 −0.17）。现在直接拿几何的 pos 数组量。 */
+  function fitView(pts, aspect) {
+    var TZ0 = 0.3025;                              // 模型竖直中心（世界 z）的初值
+    function boxAt(D, tz) {
+      var ce = Math.cos(ELEV), se = Math.sin(ELEV);
+      var tgt = [0, 0, tz];
+      var eye = [D * ce * Math.sin(view.az), -D * ce * Math.cos(view.az), tz + D * se];
+      var pr = makeProj(eye, tgt, aspect);
+      var x0 = 9, x1 = -9, y0 = 9, y1 = -9;
+      for (var i = 0; i < pts.length; i += 3) {
+        var s = pr(pts[i], pts[i + 1], pts[i + 2]);
+        if (!s) return null;
+        if (s[0] < x0) x0 = s[0]; if (s[0] > x1) x1 = s[0];
+        if (s[1] < y0) y0 = s[1]; if (s[1] > y1) y1 = s[1];
+      }
+      return { wx: Math.max(-x0, x1), wy: Math.max(-y0, y1), cy: (y0 + y1) / 2,
+               y0: y0, y1: y1, x0: x0, x1: x1 };
     }
-    return { wx: Math.max(-x0, x1), wy: Math.max(-y0, y1), cy: (y0 + y1) / 2 };
-  }
-  function fitView(name, aspect) {
-    var m = PRESETS[name], res = m.res, nf = m.z.length, v = new Float32Array(nf);
-    var lo = Infinity, hi = -Infinity, NQ = 14;
-    for (var y = 0; y <= NQ; y++) for (var x = 0; x <= NQ; x++) {
-      evalField(m.z, res, x / NQ, y / NQ, v);
-      for (var i = 0; i < nf; i++) { if (v[i] < lo) lo = v[i]; if (v[i] > hi) hi = v[i]; }
-    }
-    var span = Math.max(1, hi - lo), HZ = 0.62, FLOOR = -0.015;
-    var target = [0, 0, (HZ + FLOOR) / 2];
-    /* 采样点：控制网角点 + 地面四角（地面是竖直方向的最低处） */
-    var pts = [];
-    for (var iy = 0; iy < res; iy++) for (var ix = 0; ix < res; ix++) {
-      var pxw = ix / (res - 1) - 0.5, pyw = iy / (res - 1) - 0.5;
-      for (var kk = 0; kk < nf; kk++) pts.push(pxw, pyw, (m.z[kk][iy * res + ix] - lo) / span * HZ);
-    }
-    for (var c = 0; c < 4; c++) pts.push((c & 1 ? 0.5 : -0.5), (c & 2 ? 0.5 : -0.5), FLOOR);
-    /* 【取景 = 先定距离、再把模型竖直居中】两个量都靠"真投影一遍再量"求，
-       不推公式（推公式踩了两次坑：漏透视导致溢出 39%、反向补偿导致模型缩成一小点）。
-
-       fitZ(dz)：把相机目标点抬 dz（世界 z），返回 { dist, cy } ——
-         dist = 二分出的"包围盒半宽半高都 ≤ 1/1.06"最小距离；
-         cy   = 该距离下包围盒中心在 NDC 上的竖直偏移。 */
-    function fitZ(dz) {
-      var target = [0, 0, (HZ + FLOOR) / 2 + dz];
-      var loD = 0.4, hiD = 14, box = null;
-      for (var it = 0; it < 24; it++) {
+    function fitTz(tz) {                           // 定距离：二分到"刚好塞进画面"
+      var loD = 0.4, hiD = 14, best = null;
+      for (var it = 0; it < 26; it++) {
         var mid = (loD + hiD) / 2;
-        var b = ndcBox(pts, mid, target, view.az, aspect);
-        if (b && b.wx <= 1 / 1.06 && b.wy <= 1 / 1.06) { hiD = mid; box = b; } else loD = mid;
+        var b = boxAt(mid, tz);
+        if (b && b.wx <= 1 / 1.06 && b.wy <= 1 / 1.06) { hiD = mid; best = b; } else loD = mid;
       }
-      if (!box) return null;
-      return { dist: hiD, cy: box.cy };
+      return best ? { dist: hiD, cy: best.cy } : null;
     }
-    /* cy 随 dz 单调（抬得越高、模型在画面里越靠下），所以对 dz 二分即可 */
-    var a = fitZ(-0.6), bz = fitZ(0.6);
-    var dzBest = 0, res = a || bz;
-    if (a && bz) {
-      var lo2 = -0.6, hi2 = 0.6;
-      for (var it2 = 0; it2 < 20; it2++) {
-        var m2 = (lo2 + hi2) / 2, r2 = fitZ(m2);
-        if (!r2) break;
-        res = r2; dzBest = m2;
-        if (r2.cy > 0) lo2 = m2; else hi2 = m2;    // cy>0 说明模型偏上，还要往上抬
-      }
+    /* 【竖直居中：一次解到位，不要迭代】
+       相机目标点沿世界 z 抬 t，画面上的 NDC 竖直中心就减 ΔN。
+       由 lookAt 的定义：up=(0,0,1) 时，视线竖直方向 = (−sin(el)·sin(az), sin(el)·cos(az), cos(el))，
+       所以目标点上抬 t 会让 NDC 中心减 ΔN = (t·cos(el)) · (f / D) · cos(el)。
+       于是 t = N · D / (f · cos²(el))，一步就行。
+       之前用"迭代 + 比例换算"那版会发散（实测把模型推到画面外，偏心 −1.35）。 */
+    var ce0 = Math.cos(ELEV), f0 = 1 / Math.tan(FOVY / 2);
+    var tz = TZ0, r = fitTz(tz);
+    if (r && Math.abs(r.cy) > 1e-4) {
+      var t = r.cy * r.dist / (f0 * ce0 * ce0);
+      var r2 = fitTz(tz + t);
+      if (r2 && Math.abs(r2.cy) < Math.abs(r.cy)) { tz += t; r = r2; }
     }
-    view.target = [0, 0, (HZ + FLOOR) / 2 + dzBest];
-    view.dist = res ? res.dist : 2.4;
+    view.target = [0, 0, tz];
+    view.dist = r ? r.dist : 2.4;
     view.el = ELEV;
-    void span;
   }
   function setModel(name) {
     if (!cache[name]) cache[name] = upload(buildModel(PRESETS[name]));
     cur = cache[name];
     curName = name;
     var aspect = Math.max(0.4, CV.clientWidth / Math.max(1, CV.clientHeight));
-    fitView(name, aspect);
+    fitView(cur.xyz, aspect);
     lastW = CV.clientWidth;
     var btns = document.querySelectorAll("[data-strata]");
     for (var i = 0; i < btns.length; i++) {
@@ -474,7 +472,7 @@
   window.addEventListener("resize", function () {
     if (!cur) return;
     var w = CV.clientWidth;
-    if (Math.abs(w - lastW) > 2) { fitView(curName, Math.max(0.4, w / Math.max(1, CV.clientHeight))); lastW = w; }
+    if (Math.abs(w - lastW) > 2) { fitView(cur.xyz, Math.max(0.4, w / Math.max(1, CV.clientHeight))); lastW = w; }
   });
 
   try { setModel(NAMES[1] || NAMES[0]); }
