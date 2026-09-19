@@ -55,26 +55,62 @@
     var v = new Float32Array(nf);
     var x, y, i, q;
 
-    /* 2.1 粗网格上算"每个格点该不该画"——用硬 min：
-           第 i 张面只在"比所有更年轻的界面都低一截"的地方显示 */
+    /* 高程范围先算出来：后面的软化尺度要用它（app 里 soften = mapL/NS 对应的高程量级）。
+       归一化也在同一处做，省得来回翻。 */
+    var lo = Infinity, hi = -Infinity;
+    for (i = 0; i < nf; i++) {
+      var zi = P.z[i];
+      for (q = 0; q < zi.length; q++) { var zz = Number(zi[q]); if (zz < lo) lo = zz; if (zz > hi) hi = zz; }
+    }
+    var span = Math.max(1, hi - lo), HZ = 0.62, FLOOR = -0.015;
+    var soften = Math.max(1e-6, span / 96);          // 一个网格步长的高程量级
+
+    /* 2.1 粗网格上算"每个格点该不该画"——用 app 同一条规则（软最小 + 后缀和）：
+           第 i 张面只在"比所有更年轻的界面都低一截"的地方显示。
+           app 用的是软化过的软最小值，不是硬 min；
+           硬 min 会长出多余的面（实测侧壁可见面积比 app 多 2 倍多）。 */
     var maskC = [];
     for (i = 0; i < nf; i++) maskC.push(new Float32Array(CST * CST));
     for (y = 0; y < CST; y++) for (x = 0; x < CST; x++) {
       evalField(P.z, res, x / CU, y / CU, v);
-      var run = Infinity;
+      var zmin = Infinity;
+      for (i = 0; i < nf; i++) if (v[i] < zmin) zmin = v[i];
+      var run = 0, runMin = Infinity;
       for (i = nf - 1; i >= 0; i--) {
-        maskC[i][y * CST + x] = (run === Infinity) ? 1 : (run - v[i]);
-        if (v[i] < run) run = v[i];
+        /* 后缀和：走到 i 时 run 只含 j>i 的那些项 */
+        var above = run > 0 ? zmin - soften * Math.log(run) : Infinity;
+        var cull = Math.min(above, runMin);          // 软最小值
+        maskC[i][y * CST + x] = (cull === Infinity) ? 1 : (cull - v[i]);
+        var t = Math.exp(-(v[i] - zmin) / soften);
+        run += t;
+        if (v[i] < runMin) runMin = v[i];
       }
     }
 
-    /* 2.2 渲染网格上的高程场 + 遮挡（遮挡从粗网格双线性取，避免硬台阶） */
+    /* 2.2 渲染网格上的高程场；顺便在同一个循环里算出 app 那条规则的场
+           F_i = min(上面那些界面的软最小值, 上面那些界面的硬最小) − z_i。
+           有了 F 和 Z，任何一点的"场"都能精确还原：
+             第 i 张面在 z 处的场 = min(F_i − z, Z_i − z)，
+           而 CULL_i = F_i + Z_i 就是"该面被压到看不见的那个高程"。 */
     var Z = [];
     for (i = 0; i < nf; i++) Z.push(new Float32Array(STEP * STEP));
+    var CULL = [];
+    for (i = 0; i < nf; i++) CULL.push(new Float32Array(STEP * STEP));
     for (y = 0; y < STEP; y++) for (x = 0; x < STEP; x++) {
       evalField(P.z, res, x / N, y / N, v);
       q = y * STEP + x;
       for (i = 0; i < nf; i++) Z[i][q] = v[i];
+      var zmin2 = Infinity;
+      for (i = 0; i < nf; i++) if (v[i] < zmin2) zmin2 = v[i];
+      var run2 = 0, runMin2 = Infinity;
+      for (i = nf - 1; i >= 0; i--) {
+        var above2 = run2 > 0 ? zmin2 - soften * Math.log(run2) : Infinity;
+        var cull2 = Math.min(above2, runMin2);
+        CULL[i][q] = (cull2 === Infinity) ? 1e9 : cull2;
+        var t2 = Math.exp(-(v[i] - zmin2) / soften);
+        run2 += t2;
+        if (v[i] < runMin2) runMin2 = v[i];
+      }
     }
     var M = [];
     for (i = 0; i < nf; i++) {
@@ -100,13 +136,7 @@
       band[q] = got;
     }
 
-    /* 2.4 世界坐标：底面 1×1 的正方形，高程归一化后压一点，避免瘦高 */
-    var lo = Infinity, hi = -Infinity;
-    for (i = 0; i < nf; i++) for (q = 0; q < Z[i].length; q++) {
-      if (Z[i][q] < lo) lo = Z[i][q];
-      if (Z[i][q] > hi) hi = Z[i][q];
-    }
-    var span = Math.max(1, hi - lo), HZ = 0.62, FLOOR = -0.015;
+    /* 2.4 世界坐标换算（lo/span/HZ/FLOOR 已在开头算好）*/
     var PX = function (t) { return (t / N - 0.5); };
     var PZ = function (i2, q2) { return (Z[i2][q2] - lo) / span * HZ; };
 
@@ -148,18 +178,21 @@
         return CL[b - 1];
       });
     }
-    /* 各层顶面：只在该层存在、且没被更年轻的压住的地方画 */
+    /* 各层顶面：只在该层存在、且没被更年轻的压住的地方画。
+       判据直接用 app 的场：第 i 张面在 z 处的场 = min(CULL_i − z, 本层厚度)，
+       场 ≥ 0 才画；厚度项天然成立（z 就是本层顶面），所以只需 Z[i] ≤ CULL[i]。 */
     for (var kk = 0; kk < ns; kk++) {
       if (!P.ifaceVis[kk + 1] || !P.strataVis[kk]) continue;
-      var colk = CL[kk], mk = M[kk + 1], topk = Z[kk + 1], botk = Z[kk];
+      var colk = CL[kk], ck = CULL[kk + 1], topk = Z[kk + 1], botk = Z[kk];
       for (y = 0; y < N; y++) for (x = 0; x < N; x++) {
-        cell(kk + 1, x, y, (function (mk2, topk2, botk2) {
+        cell(kk + 1, x, y, (function (ck2, topk2, botk2) {
           return function (q00, q10, q01, q11) {
-            if (mk2[q00] <= 0 && mk2[q10] <= 0 && mk2[q01] <= 0 && mk2[q11] <= 0) return null;
+            if (ck2[q00] < topk2[q00] && ck2[q10] < topk2[q10] &&
+                ck2[q01] < topk2[q01] && ck2[q11] < topk2[q11]) return null;
             if ((topk2[q00] - botk2[q00]) <= 1e-6) return null;
             return colk;
           };
-        })(mk, topk, botk));
+        })(ck, topk, botk));
       }
     }
     /* 四周侧壁（剖面） */
@@ -175,19 +208,33 @@
       var xa = PX(A[0]), ya = PX(A[1]), xb = PX(B[0]), yb = PX(B[1]);
       /* 基底：地面 → 第 1 张界面 */
       quad([xa, ya, FLOOR], [xb, yb, FLOOR], [xb, yb, PZ(0, qb)], [xa, ya, PZ(0, qa)], CB);
-      /* 【剖面 = 完整的地层柱状剖面】
-         这里特意【不】按 Cmin 裁。理由：试过按沉积次序裁，
-         结果剖面只剩 2~5% 的高度 —— 因为规则本来就会把"被年轻层压住"的部分全藏掉，
-         边界柱上几乎每一层的顶面都超出 Cmin（查过 app 自己的岩体场，
-         边界柱上 19/27 层的顶面处场是负的），于是侧面就"完全透明"了。
-         剖面本来就该展示该柱上的地层序列，所以画满整层的厚度；
-         "谁露出来、谁被压住"由【表露面】的露头带表达（那一层与 app 逐点一致）。 */
+      /* 【剖面按 app 同一条场裁切】
+         一个界的场 C_k = 比它年轻的界面里最低的那个（app 用软化过的软最小值，
+         这里用硬 min，只差一点）。
+         岩体的判据是 f(z) = min(C_k − z, 本层厚度) ≥ 0，所以每一层可见的高度
+         就是从下界面往上，直到 min(上界面, C_k) 为止。
+         ⚠ 之前两版都栽在这里：
+           · 不裁  → 27 张整面互相重叠（用户："没有按层序规则"）
+           · 只画到 Cmin 而漏掉"上界面"这一项 → 只剩 2~5%，看着"完全透明"
+         量过 app 自己的南墙：可见面积占 8.7%(预设3) / 11.8%(预设1) / 23.3%(预设2)，
+         所以必须按 f ≥ 0 的口径裁，不能图省事。 */
       for (var k3 = 0; k3 < ns; k3++) {
         if (!P.strataVis[k3]) continue;
         var bot1 = PZ(k3, qa), bot2 = PZ(k3, qb);
         var top1 = PZ(k3 + 1, qa), top2 = PZ(k3 + 1, qb);
         if ((top1 - bot1) <= 1e-6 && (top2 - bot2) <= 1e-6) continue;   // 这一层在这里尖灭了
-        quad([xa, ya, bot1], [xb, yb, bot2], [xb, yb, top2], [xa, ya, top1], CL[k3]);
+        /* C_k = 比 k 年轻的那些界面里最低的那个（用 app 同口径的场：CULL_i）；
+           这一层的可见上沿 = min(本层顶面, 所有更年轻界面的 CULL) */
+        var e1 = Z[k3 + 1][qa], e2 = Z[k3 + 1][qb];
+        for (var i2 = k3 + 1; i2 < nf; i2++) {
+          if (CULL[i2][qa] < e1) e1 = CULL[i2][qa];
+          if (CULL[i2][qb] < e2) e2 = CULL[i2][qb];
+        }
+        if (e1 < Z[k3][qa]) e1 = Z[k3][qa];
+        if (e2 < Z[k3][qb]) e2 = Z[k3][qb];
+        var z1 = (e1 - lo) / span * HZ, z2 = (e2 - lo) / span * HZ;
+        if (z1 - bot1 <= 1e-6 && z2 - bot2 <= 1e-6) continue;           // 整段都被压住了
+        quad([xa, ya, bot1], [xb, yb, bot2], [xb, yb, z2], [xa, ya, z1], CL[k3]);
       }
     }
     /* 底面 */
@@ -378,23 +425,22 @@
       }
       return best ? { dist: hiD, cy: best.cy } : null;
     }
-    /* 【竖直居中：灵敏度用数值差分实测，不推公式】
-       实测 cy 对"目标点抬 dz"的敏感度约 −0.77（与公式给的不是一个量级），
-       按公式那版会把模型推过头（残留偏心 0.147）。这里直接量：
-         k = (cy(tz+h) − cy(tz)) / h，然后一次修正 tz += −cy/k。 */
-    var tz = TZ0, r = fitTz(tz);
-    for (var pass = 0; pass < 3 && r; pass++) {
-      if (Math.abs(r.cy) < 0.004) break;
-      var h = 0.05, r2 = fitTz(tz + h);
-      if (!r2) break;
-      var k = (r2.cy - r.cy) / h;
-      if (!isFinite(k) || Math.abs(k) < 1e-6) break;
-      var t3 = -r.cy / k;
-      if (t3 > 2) t3 = 2; if (t3 < -2) t3 = -2;          // 别一次跳太远
-      var r3 = fitTz(tz + t3);
-      if (!r3) break;
-      tz += t3; r = r3;
+    /* 【竖直居中：直接扫描，不推公式也不靠灵敏度估计】
+       踩过的坑：闭式解方向反了、比例公式把模型推出画面、有限差分灵敏度
+       在几何改动后收敛不了（残留偏心到过 0.34）。干脆扫：
+       先在 ±0.7 粗略扫 15 个点，再在最优点附近细扫 11 个点。
+       每个点只有 26 次二分 × 12k 个顶点投影，全部扫完也就十几毫秒。 */
+    var bestTz = TZ0, bestR = null, bestAbs = Infinity;
+    function tryTz(tz2) {
+      var rr = fitTz(tz2);
+      if (!rr) return;
+      if (Math.abs(rr.cy) < bestAbs) { bestAbs = Math.abs(rr.cy); bestTz = tz2; bestR = rr; }
     }
+    for (var i5 = 0; i5 <= 14; i5++) tryTz(TZ0 - 0.7 + i5 * 0.1);
+    var c0 = bestTz;
+    for (var i6 = -5; i6 <= 5; i6++) tryTz(c0 + i6 * 0.02);
+    var tz = bestTz, r = bestR;
+    if (!r) { r = fitTz(TZ0); tz = TZ0; }
     view.target = [0, 0, tz];
     view.dist = r ? r.dist : 2.4;
     view.el = ELEV;
