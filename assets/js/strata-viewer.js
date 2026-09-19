@@ -173,31 +173,21 @@
       var A = per[tt], B = per[tt + 1];
       var qa = A[1] * STEP + A[0], qb = B[1] * STEP + B[0];
       var xa = PX(A[0]), ya = PX(A[1]), xb = PX(B[0]), yb = PX(B[1]);
-      /* 【剖面也要服从沉积次序规则】——和 app 里一样：
-         只画到"该柱上所有更年轻界面里最低的那一个"为止（Cmin），再往上被年轻岩层占住了。
-         少了这一步，各层的整张侧壁会一块压一块地叠在一起（就是之前那版的样子）。
-         Cmin 用硬 min；只取两个端点各自的 Cmin 再线性过渡，够用。 */
-      /* 基底：地面 → 第 1 张界面；上界同样是 Cmin（比第 1 张更年轻的最低者），
-         绝不能超过它，否则基底侧壁会盖到年轻岩层上。
-         lid ≥ 2 时界面 0 不是唯一的最低者，所以 c1/c2 从【界面 1】开始取。 */
-      var c1 = PZ(1, qa), c2 = PZ(1, qb), i0;
-      if (lid >= 2) for (i0 = 2; i0 < lid; i0++) {
-        var zz1 = PZ(i0, qa), zz2 = PZ(i0, qb);
-        if (zz1 < c1) c1 = zz1;
-        if (zz2 < c2) c2 = zz2;
-      }
-      if (c1 < PZ(0, qa)) c1 = PZ(0, qa);
-      if (c2 < PZ(0, qb)) c2 = PZ(0, qb);
-      quad([xa, ya, FLOOR], [xb, yb, FLOOR], [xb, yb, c2], [xa, ya, c1], CB);
+      /* 基底：地面 → 第 1 张界面 */
+      quad([xa, ya, FLOOR], [xb, yb, FLOOR], [xb, yb, PZ(0, qb)], [xa, ya, PZ(0, qa)], CB);
+      /* 【剖面 = 完整的地层柱状剖面】
+         这里特意【不】按 Cmin 裁。理由：试过按沉积次序裁，
+         结果剖面只剩 2~5% 的高度 —— 因为规则本来就会把"被年轻层压住"的部分全藏掉，
+         边界柱上几乎每一层的顶面都超出 Cmin（查过 app 自己的岩体场，
+         边界柱上 19/27 层的顶面处场是负的），于是侧面就"完全透明"了。
+         剖面本来就该展示该柱上的地层序列，所以画满整层的厚度；
+         "谁露出来、谁被压住"由【表露面】的露头带表达（那一层与 app 逐点一致）。 */
       for (var k3 = 0; k3 < ns; k3++) {
         if (!P.strataVis[k3]) continue;
         var bot1 = PZ(k3, qa), bot2 = PZ(k3, qb);
         var top1 = PZ(k3 + 1, qa), top2 = PZ(k3 + 1, qb);
         if ((top1 - bot1) <= 1e-6 && (top2 - bot2) <= 1e-6) continue;   // 这一层在这里尖灭了
-        var e1 = Math.min(top1, c1), e2 = Math.min(top2, c2);
-        if (e1 - bot1 <= 1e-6 && e2 - bot2 <= 1e-6) continue;           // 整段都被压住了
-        quad([xa, ya, bot1], [xb, yb, bot2], [xb, yb, Math.max(bot2, e2)],
-             [xa, ya, Math.max(bot1, e1)], CL[k3]);
+        quad([xa, ya, bot1], [xb, yb, bot2], [xb, yb, top2], [xa, ya, top1], CL[k3]);
       }
     }
     /* 底面 */
@@ -238,7 +228,7 @@
   var AP = gl.getAttribLocation(prog, "aP"), AN = gl.getAttribLocation(prog, "aN"),
       AC = gl.getAttribLocation(prog, "aC"), uMVP = gl.getUniformLocation(prog, "uMVP");
   gl.enable(gl.DEPTH_TEST);
-  gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
+  /* 不剔除背面：地层在褶皱处会倒转，绕序跟着反，剔除会把该看见的面剔掉。着色用两面光照。 */
   gl.clearColor(0, 0, 0, 0);
 
   function upload(m) {
@@ -388,18 +378,22 @@
       }
       return best ? { dist: hiD, cy: best.cy } : null;
     }
-    /* 【竖直居中：一次解到位，不要迭代】
-       相机目标点沿世界 z 抬 t，画面上的 NDC 竖直中心就减 ΔN。
-       由 lookAt 的定义：up=(0,0,1) 时，视线竖直方向 = (−sin(el)·sin(az), sin(el)·cos(az), cos(el))，
-       所以目标点上抬 t 会让 NDC 中心减 ΔN = (t·cos(el)) · (f / D) · cos(el)。
-       于是 t = N · D / (f · cos²(el))，一步就行。
-       之前用"迭代 + 比例换算"那版会发散（实测把模型推到画面外，偏心 −1.35）。 */
-    var ce0 = Math.cos(ELEV), f0 = 1 / Math.tan(FOVY / 2);
+    /* 【竖直居中：灵敏度用数值差分实测，不推公式】
+       实测 cy 对"目标点抬 dz"的敏感度约 −0.77（与公式给的不是一个量级），
+       按公式那版会把模型推过头（残留偏心 0.147）。这里直接量：
+         k = (cy(tz+h) − cy(tz)) / h，然后一次修正 tz += −cy/k。 */
     var tz = TZ0, r = fitTz(tz);
-    if (r && Math.abs(r.cy) > 1e-4) {
-      var t = r.cy * r.dist / (f0 * ce0 * ce0);
-      var r2 = fitTz(tz + t);
-      if (r2 && Math.abs(r2.cy) < Math.abs(r.cy)) { tz += t; r = r2; }
+    for (var pass = 0; pass < 3 && r; pass++) {
+      if (Math.abs(r.cy) < 0.004) break;
+      var h = 0.05, r2 = fitTz(tz + h);
+      if (!r2) break;
+      var k = (r2.cy - r.cy) / h;
+      if (!isFinite(k) || Math.abs(k) < 1e-6) break;
+      var t3 = -r.cy / k;
+      if (t3 > 2) t3 = 2; if (t3 < -2) t3 = -2;          // 别一次跳太远
+      var r3 = fitTz(tz + t3);
+      if (!r3) break;
+      tz += t3; r = r3;
     }
     view.target = [0, 0, tz];
     view.dist = r ? r.dist : 2.4;
