@@ -48,7 +48,6 @@
   /* ---------- 2. 把预设编译成能直接画的三角形 ---------- */
   var N = 34;                       // 每边 N 段（地层与剖面用，够光滑也不重）
   var STEP = N + 1;                 // 每边点数
-  var NC = 68;                      // 地表的细分格：露头带的分界要细，不然是台阶
   var CU = 24, CST = CU + 1;        // 算"压住"用的粗网格
 
   function buildModel(P) {
@@ -147,11 +146,39 @@
     var PX = function (t) { return (t / N - 0.5); };
     var PZ = function (i2, q2) { return (Z[i2][q2] - lo) / span * HZ; };
 
-    /* 2.5 组装三角形 */
-    var pos = [], nrm = [], col = [];
+    /* 2.5 组装三角形
+       【改成"顶点 + 索引 + 分批"】：原来每个三角形各存三个顶点（不共享、无索引），
+       地表明细一提高，顶点数就顶到 16 位索引的硬上限 65535。
+       现在顶点按位置共用并分批，每批 ≤60000 个顶点，分几次画 ——
+       于是地表能画得跟工具一样细（工具 NS=96，这边细分后等效 1/136）。 */
     var CL = P.colors.map(function (c) { return [c[0] / 255, c[1] / 255, c[2] / 255]; });
     var CB = [P.base[0] / 255, P.base[1] / 255, P.base[2] / 255];
-
+    var MAXV = 60000;                 // 每批顶点上限（Uint16 索引的硬上限是 65535）
+    var batches = [], cur = null, vmap = null;
+    function newBatch() {
+      cur = { pos: [], nrm: [], col: [], idx: [] };
+      vmap = new Map();
+      batches.push(cur);
+    }
+    /* 换批只在图元边界上做（顶点数不共享就不会出现"半个图元跨批"） */
+    function needRoom(nv) {
+      if (!cur) { newBatch(); return; }
+      if (cur.pos.length / 3 + nv > MAXV) newBatch();   // 超了就换批，不切图元
+    }
+    function vid(x, y, z, cc, nx, ny, nz) {
+      /* 顶点按"位置 + 颜色 + 法线"共用（位置相同但朝不同的面不共用，保住平直着色） */
+      var key = Math.round(x * 2e4) + "|" + Math.round(y * 2e4) + "|" + Math.round(z * 2e4) + "|" +
+                cc[0] + "," + cc[2] + "|" + nx + "," + ny + "," + nz;
+      var v = vmap.get(key);
+      if (v === undefined) {
+        v = cur.pos.length / 3;
+        cur.pos.push(x, y, z);
+        cur.nrm.push(nx, ny, nz);
+        cur.col.push(cc[0], cc[1], cc[2]);
+        vmap.set(key, v);
+      }
+      return v;
+    }
     function quad(a, b, c, d, cc) {
       /* 顶点绕序：a→b→c 从外侧看是【逆时针】（右手法则算出朝外的法线），
          这样配 gl.cullFace(BACK) 才是"只画看得见的那一面"。
@@ -161,12 +188,10 @@
       var vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
       var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
       var l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
-      var tri = [a, b, c, a, c, d];
-      for (var t = 0; t < 6; t++) {
-        pos.push(tri[t][0], tri[t][1], tri[t][2]);
-        nrm.push(nx, ny, nz);
-        col.push(cc[0], cc[1], cc[2]);
-      }
+      needRoom(4);
+      var i0 = vid(a[0], a[1], a[2], cc, nx, ny, nz), i1 = vid(b[0], b[1], b[2], cc, nx, ny, nz);
+      var i2b = vid(c[0], c[1], c[2], cc, nx, ny, nz), i3 = vid(d[0], d[1], d[2], cc, nx, ny, nz);
+      cur.idx.push(i0, i1, i2b, i0, i2b, i3);
     }
     /* 一个三角形（a→b→c 从外侧看逆时针），法线由两条边叉乘得 */
     function tri3(a, b, c, cc) {
@@ -174,12 +199,10 @@
       var vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
       var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
       var l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
-      var tri = [a, b, c];
-      for (var t = 0; t < 3; t++) {
-        pos.push(tri[t][0], tri[t][1], tri[t][2]);
-        nrm.push(nx, ny, nz);
-        col.push(cc[0], cc[1], cc[2]);
-      }
+      needRoom(3);
+      cur.idx.push(vid(a[0], a[1], a[2], cc, nx, ny, nz),
+                   vid(b[0], b[1], b[2], cc, nx, ny, nz),
+                   vid(c[0], c[1], c[2], cc, nx, ny, nz));
     }
     /* 画第 i 张面的一个格子；ok(q) 返回颜色或 null（不画） */
     function cell(i2, x2, y2, ok) {
@@ -190,66 +213,20 @@
            [PX(x2 + 1), PX(y2 + 1), PZ(i2, q11)], [PX(x2), PX(y2 + 1), PZ(i2, q01)], cc);
     }
 
-    /* 用一串"场"把格子（凸多边形）切成若干块：每块内部的符号组合一致。
-       交点在边的两端之间线性插值（场在格内是双线性的，这样已经贴得住）。
-       返回 [{pts, signs}]，signs 是这一块在该序号场上的符号。 */
-    function splitCell(pts, fields, nF) {
-      var parts = [{ pts: pts, sg: pts.map(function () { return []; }) }];
-      for (var fi = 0; fi < nF; fi++) {
-        var fld = fields[fi], out = [];
-        for (var pi = 0; pi < parts.length; pi++) {
-          var Q = parts[pi].pts, S = parts[pi].sg, m = Q.length;
-          var hasP = false, hasN = false;
-          for (var i3 = 0; i3 < m; i3++) {
-            var g3 = fld(Q[i3][2]);
-            if (g3 > 0) hasP = true; else if (g3 < 0) hasN = true;
-          }
-          if (!hasP || !hasN) {                    // 这一刀没穿过：原样留着，只把符号补齐
-            var keepSg = [];
-            for (var i5 = 0; i5 < m; i5++) {
-              var g5 = fld(Q[i5][2]);
-              keepSg.push(S[i5].concat([g5 > 0 ? 1 : (g5 < 0 ? -1 : 0)]));
-            }
-            out.push({ pts: Q, sg: keepSg });
-            continue;
-          }
-          var A = [], B = [], sA = [], sB = [];
-          for (var i4 = 0; i4 < m; i4++) {
-            var p = Q[i4], r = Q[(i4 + 1) % m];
-            var gp = fld(p[2]), gr = fld(r[2]);
-            if (gp >= 0) { A.push(p); sA.push(S[i4].concat([gp > 0 ? 1 : 0])); }
-            if (gp <= 0) { B.push(p); sB.push(S[i4].concat([gp < 0 ? -1 : 0])); }
-            if ((gp > 0 && gr < 0) || (gp < 0 && gr > 0)) {
-              var tt = gp / (gp - gr);
-              var mid = [p[0] + (r[0] - p[0]) * tt, p[1] + (r[1] - p[1]) * tt,
-                         p[2] + (r[2] - p[2]) * tt];
-              A.push(mid); sA.push(S[i4].concat([0]));
-              B.push(mid); sB.push(S[i4].concat([0]));
-            }
-          }
-          if (A.length >= 2) out.push({ pts: A, sg: sA });
-          if (B.length >= 2) out.push({ pts: B, sg: sB });
-        }
-        parts = out;
-      }
-      return parts;
-    }
-
     /* 地表：按露头带上色，并且【沿真实交线切开】。
 
-       带号的判据必须与 app 的 exposedBandXYZ 逐字一致：
-       "地表正好落在它区间内（z_k ≤ 地表 ≤ z_{k+1}）的【最上面那一层】"。
-       有些地方会【两层同时命中】（下伏褶皱层的顶面与上覆层的底面都把地表夹住），
-       那时 app 取更年轻的那层 —— 我一开始写成"数有几张界面低于地表"，
-       在格点(3,3) 得到 12 而 app 是 24，整幅表露面全乱。
-
-       切法：一圈一圈地"抠"。从最年轻的层往下试 k，把多边形里属于第 k 层的那部分
-       抠出来（就是同时满足 z_k ≤ 地表 与 地表 ≤ z_{k+1} 的部分），剩下的继续往下试。
-       这两条判据各自都是【一个光滑场】（z_k − 地表 / z_{k+1} − 地表），
-       沿格边线性插值求零点足够准 —— 所以边界落在真实交线上，不是格子的台阶。
-
-       ⚠ 千万别去插值 min(z_k − 地表, z_{k+1} − 地表)：那个 min 有折角、格内不是双线性的，
-       实测在格点上能差 96 m，切出来的边界反而更错、还凭空长出带号（24 vs app 的 23）。 */
+       【这一版是照抄工具（app）自己的做法】—— 之前两版都栽在自己发明的写法上：
+         · 第一版：格点取色 → 边界就是格子台阶；
+         · 第二版：想用 hit_k = min(地表−z_k, z_{k+1}−地表) 的零线去切，
+           但那个 min 有折角、【格内不是双线性的】，用格角值插值求零点会差 96 m，
+           切出来反而更错（凭空长出带号 24 vs app 的 23）。
+       工具的做法朴素得多，也稳得多：
+         1) 先看这一格的四个角上"带号"是不是同一个；一样就整格一个颜色，什么都不用切；
+         2) 不一样才动手：对【每一张界面 k】，用它的场 g = 地表 − z_k 把格子切成
+            g≥0 / g≤0 两块（交点在边上线性插值）。g 是【一个光滑场】，
+            所以这一步又准又稳；
+         3) 切完的每一块，用【它自己的重心】问一次 exposedBandXYZ 定颜色。
+       一遍下来颜色边界就精确落在"界面与地表的交线"上，且每一块同色。 */
     function bilin(Za, x, y) {
       /* (x,y) 是世界坐标（-0.5..0.5），换算成渲染网格的分数坐标后双线性取值 */
       var fxx = (x + 0.5) * N, fyy = (y + 0.5) * N;
@@ -259,6 +236,8 @@
       return (Za[q0] * (1 - tx) + Za[q0 + 1] * tx) * (1 - ty)
            + (Za[q0 + STEP] * (1 - tx) + Za[q0 + STEP + 1] * tx) * ty;
     }
+    /* 与 app 的 exposedBandXYZ 逐字一致：地表落在区间里（z_k ≤ 地表 ≤ z_{k+1}）的
+       【最上面那一层】。有些地方两层同时命中，那时取更年轻的那层。 */
     function bandAtXY(x, y) {
       var zs = bilin(Z[lid], x, y), bb = 0;
       for (var k = 0; k < ns; k++) {
@@ -271,13 +250,24 @@
       for (var t = 0; t < P2.length; t++) { sx += P2[t][0]; sy += P2[t][1]; }
       return [sx / P2.length, sy / P2.length];
     }
-    /* 按场 f 的符号切：want = +1 留 f≥0 的那半，-1 留 f≤0 的那半 */
-    function halfPlane(P2, f, want) {
-      var out = [], m = P2.length;
-      for (var t = 0; t < m; t++) {
-        var p = P2[t], r = P2[(t + 1) % m];
-        var gp = f(p[0], p[1]), gr = f(r[0], r[1]);
-        if (want > 0 ? (gp >= 0) : (gp <= 0)) out.push(p);
+    /* 用一张界面的场把多边形切成两半。
+       符号必须与工具的 clipChainW 一模一样：w = (该界面 − 地表 > 0)，
+       也就是"这一刀把界面在地表之上的那半和地表之下的那半分开"。
+       side=+1 留 g>0（界面在地表之上），side=−1 留 g<0。 */
+    function clipByIface(P2, kk, side) {
+      var m = P2.length;
+      var gs2 = new Array(m);
+      for (var t = 0; t < m; t++) gs2[t] = bilin(Z[kk], P2[t][0], P2[t][1]) - bilin(Z[lid], P2[t][0], P2[t][1]);
+      var hasP = false, hasN = false;
+      for (var t2 = 0; t2 < m; t2++) { if (gs2[t2] > 0) hasP = true; else if (gs2[t2] < 0) hasN = true; }
+      if (!hasP || !hasN) {                      // 这一刀没切开：整块留着（由调用方决定）
+        return (side > 0 ? hasP : hasN) ? P2 : null;
+      }
+      var out = [];
+      for (var t3 = 0; t3 < m; t3++) {
+        var p = P2[t3], r = P2[(t3 + 1) % m];
+        var gp = gs2[t3], gr = gs2[(t3 + 1) % m];
+        if (side > 0 ? (gp >= 0) : (gp <= 0)) out.push(p);
         if ((gp > 0 && gr < 0) || (gp < 0 && gr > 0)) {
           var tt = gp / (gp - gr);
           out.push([p[0] + (r[0] - p[0]) * tt, p[1] + (r[1] - p[1]) * tt]);
@@ -285,59 +275,73 @@
       }
       return out.length >= 3 ? out : null;
     }
-    function emitPiece(P2, band) {
+    function emitPiece(P2) {
       if (!P2 || P2.length < 3) return;
+      var c0 = centroid(P2);
+      var band = bandAtXY(c0[0], c0[1]);
+      /* 记一下地块面积，用来确认"整幅地表被铺满、不重不漏" */
+      var ar = 0;
+      for (var ia = 0; ia < P2.length; ia++) {
+        var pa = P2[ia], pb = P2[(ia + 1) % P2.length];
+        ar += pa[0] * pb[1] - pb[0] * pa[1];
+      }
+      capCover += ar / 2;
       if (band <= 0 || !P.strataVis[band - 1]) return;
       var cc = CL[band - 1];
       var pts3 = P2.map(function (p) { return [p[0], p[1], (bilin(Z[lid], p[0], p[1]) - lo) / span * HZ]; });
       for (var i8 = 1; i8 < pts3.length - 1; i8++) { tri3(pts3[0], pts3[i8], pts3[i8 + 1], cc); capTris++; }
       capPieces++;
+      if (band < capBandMin) capBandMin = band;
+      if (band > capBandMax) capBandMax = band;
     }
     var capPieces = 0, capTris = 0, capCells = 0, capBandMin = 99, capBandMax = -1;
+    var capRegions = 0, capDeep = 0, capCover = 0;
+    var DEEP_MAX = 2;                 // 跨带格最多再细分 2 层（每层 ×2 → 最细 1/136）
+    /* 一个矩形格：四角带号一样就整块一个颜色；不一样就按工具的写法切开再逐块取色。
+       depth > 0 时说明【这一格跨带】，先再细分一层 —— 工具之所以看着顺，
+       是因为它一格只有 1/96，我这边画地层的网格是 1/34，直接切出来仍旧是台阶；
+       所以跨带的那几格额外细分（只占 15% 左右，顶点数涨得有限）。 */
+    function capRegion(x0, y0, x1, y1, depth) {
+      capRegions++;
+      var b0 = bandAtXY(x0, y0);
+      if (bandAtXY(x1, y0) === b0 && bandAtXY(x1, y1) === b0 && bandAtXY(x0, y1) === b0) {
+        emitPiece([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+        return true;
+      }
+      if (depth > 0) {
+        capDeep++;
+        var xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
+        capRegion(x0, y0, xm, ym, depth - 1); capRegion(xm, y0, x1, ym, depth - 1);
+        capRegion(x0, ym, xm, y1, depth - 1); capRegion(xm, ym, x1, y1, depth - 1);
+        return false;
+      }
+      /* 对每一张界面切一刀：g = 该界面 − 地表，是【一个光滑场】，
+         所以格边线性插值求交点又准又稳（跟工具的 clipChainW 完全同一套）。 */
+      var polys = [[[x0, y0], [x1, y0], [x1, y1], [x0, y1]]];
+      for (var k2 = 0; k2 < lid; k2++) {
+        /* 先用格点的符号筛：这一格的四个角都在同一侧就不用切（跟工具一样的早退） */
+        var wa = (bilin(Z[k2], x0, y0) - bilin(Z[lid], x0, y0) > 0) ? 1 : 0;
+        var wb = (bilin(Z[k2], x1, y0) - bilin(Z[lid], x1, y0) > 0) ? 1 : 0;
+        var wc = (bilin(Z[k2], x1, y1) - bilin(Z[lid], x1, y1) > 0) ? 1 : 0;
+        var wd = (bilin(Z[k2], x0, y1) - bilin(Z[lid], x0, y1) > 0) ? 1 : 0;
+        if (wa === wb && wa === wc && wa === wd) continue;
+        var next = [];
+        for (var pi = 0; pi < polys.length; pi++) {
+          var Q = polys[pi];
+          var a1 = clipByIface(Q, k2, +1), b1 = clipByIface(Q, k2, -1);
+          if (!a1 || !b1) { next.push(Q); continue; }   // 这一刀没切开，整块留着（否则出空洞）
+          next.push(a1); next.push(b1);
+        }
+        polys = next;
+      }
+      for (var pf = 0; pf < polys.length; pf++) emitPiece(polys[pf]);
+      return false;
+    }
     var capStepW = 1 / N;
     for (y = 0; y < N; y++) for (x = 0; x < N; x++) {
       capCells++;
-      var X0 = x / N - 0.5, Y0 = y / N - 0.5, X1 = X0 + capStepW, Y1 = Y0 + capStepW;
-      /* 一圈：从最年轻的层往下抠，抠出来的每一块同色，剩下的继续往下 */
-      var rest = [[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]];
-      for (var k2 = ns - 1; k2 >= 0 && rest && rest.length >= 3; k2--) {
-        var c0 = centroid(rest);
-        var kept = CL[k2];
-        /* 这一块的重心属不属于第 k2 层？不属于就跳过（省掉大部分切开操作） */
-        var zsc = bilin(Z[lid], c0[0], c0[1]);
-        var inBand = bilin(Z[k2], c0[0], c0[1]) <= zsc + 1e-3 && zsc <= bilin(Z[k2 + 1], c0[0], c0[1]) + 1e-3;
-        if (!inBand) continue;
-        var fLo = (function (kk) { return function (fx, fy) { return bilin(Z[kk], fx, fy) - bilin(Z[lid], fx, fy); }; })(k2);
-        var fHi = (function (kk) { return function (fx, fy) { return bilin(Z[lid], fx, fy) - bilin(Z[kk + 1], fx, fy); }; })(k2);
-        /* 先抠出"地表 ≥ z_k"的部分，再从里面抠出"地表 ≤ z_{k+1}"的部分 */
-        var A1 = halfPlane(rest, fLo, +1);
-        var Inn = A1 ? halfPlane(A1, fHi, +1) : null;
-        if (Inn) {
-          emitPiece(Inn, k2 + 1);
-          if (k2 + 1 < capBandMin) capBandMin = k2 + 1;
-          if (k2 + 1 > capBandMax) capBandMax = k2 + 1;
-          /* 剩下的 = 原块减去这一块 */
-          var fAll = function (fx, fy) {
-            return Math.min(bilin(Z[k2], fx, fy) - bilin(Z[lid], fx, fy),
-                            bilin(Z[lid], fx, fy) - bilin(Z[k2 + 1], fx, fy));
-          };
-          var RestA = halfPlane(rest, fLo, -1);
-          var OutHi = A1 ? halfPlane(A1, fHi, -1) : null;
-          rest = RestA;
-          if (OutHi) {
-            /* A1 里不属于本层的那半也要留着继续往下试；两块都塞进待处理清单 */
-            if (!rest) rest = OutHi;
-            else rest = rest.concat(OutHi);
-          }
-        }
-      }
-      /* 兜底：剩下的（含边界外/数值毛刺）按重心直接定带号 */
-      if (rest && rest.length >= 3) {
-        var cR = centroid(rest);
-        var bR = bandAtXY(cR[0], cR[1]);
-        emitPiece(rest, bR);
-        if (bR > 0) { if (bR < capBandMin) capBandMin = bR; if (bR > capBandMax) capBandMax = bR; }
-      }
+      var X0 = x / N - 0.5, Y0 = y / N - 0.5;
+      capRegion(X0, Y0, X0 + capStepW, Y0 + capStepW, DEEP_MAX);
     }
     /* 各层顶面：只在该层存在、且没被更年轻的压住的地方画。
        判据直接用 app 的场：第 i 张面在 z 处的场 = min(CULL_i − z, 本层厚度)，
@@ -404,9 +408,19 @@
            [PX(x + 1), PX(y), FLOOR], [PX(x), PX(y), FLOOR], CB);
     }
 
-    return { pos: new Float32Array(pos), nrm: new Float32Array(nrm), col: new Float32Array(col),
-             count: pos.length / 3, xyz: new Float32Array(pos), Z: Z, mask: M, band: band,
-             capPieces: capPieces, capTris: capTris, capCells: capCells, capBandMin: capBandMin, capBandMax: capBandMax };
+    /* 收尾：按批打包（每批自带 pos/nrm/col/idx，下标都是本批内的，不越界） */
+    var out = [], allPos = [];
+    for (var bi = 0; bi < batches.length; bi++) {
+      var B0 = batches[bi];
+      if (!B0.pos.length) continue;
+      out.push({ pos: new Float32Array(B0.pos), nrm: new Float32Array(B0.nrm),
+                 col: new Float32Array(B0.col), idx: new Uint16Array(B0.idx),
+                 idxCount: B0.idx.length, verts: B0.pos.length / 3 });
+      for (var vi = 0; vi < B0.pos.length; vi++) allPos.push(B0.pos[vi]);
+    }
+    return { batches: out, count: allPos.length / 3, xyz: new Float32Array(allPos), Z: Z, mask: M, band: band,
+             capPieces: capPieces, capTris: capTris, capCells: capCells, capBandMin: capBandMin, capBandMax: capBandMax,
+             capRegions: capRegions, capDeep: capDeep, capCover: capCover };
   }
 
   /* ---------- 3. 最小 WebGL ---------- */
@@ -441,13 +455,20 @@
   gl.clearColor(0, 0, 0, 0);
 
   function upload(m) {
-    function mk(arr, loc) {
+    function mk(arr) {
       var b = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, b);
       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
       return b;
     }
-    return { p: mk(m.pos), n: mk(m.nrm), c: mk(m.col), count: m.count, xyz: m.pos };
+    /* 一批一个 GPU 批次（顶点少，索引是本地 16 位下标） */
+    var bs = m.batches.map(function (b0) {
+      return { p: mk(b0.pos), n: mk(b0.nrm), c: mk(b0.col),
+               idx: (function () { var e = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, e);
+                                   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, b0.idx, gl.STATIC_DRAW); return e; })(),
+               n: b0.idxCount };
+    });
+    return { batches: bs, count: m.count, xyz: m.xyz };
   }
 
   /* ---------- 4. 相机与交互 ---------- */
@@ -536,7 +557,7 @@
   }, { passive: false });
 
   /* ---------- 5. 渲染 ---------- */
-  var cache = {}, cur = null, curName = null, lastW = 0;
+  var cache = {}, mdl = null, curName = null, lastW = 0;
   /* 相机的俯仰角写死 34°，方位角可以随便转（转的时候取景不变：
      底面是正方形、竖直已压扁，横向投影不随方位角变）。 */
   var ELEV = 34 * Math.PI / 180, FOVY = 0.92;
@@ -609,10 +630,10 @@
   }
   function setModel(name) {
     if (!cache[name]) cache[name] = upload(buildModel(PRESETS[name]));
-    cur = cache[name];
+    mdl = cache[name];
     curName = name;
     var aspect = Math.max(0.4, CV.clientWidth / Math.max(1, CV.clientHeight));
-    fitView(cur.xyz, aspect);
+    fitView(mdl.xyz, aspect);
     lastW = CV.clientWidth;
     var btns = document.querySelectorAll("[data-strata]");
     for (var i = 0; i < btns.length; i++) {
@@ -623,7 +644,7 @@
   var visible = true, last = 0;
   function frame(t) {
     requestAnimationFrame(frame);
-    if (!visible || !cur) return;
+    if (!visible || !mdl) return;
     var dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
     last = t;
     if (auto && (t - lastInput) > IDLE) view.az += AUTO * dt;
@@ -641,10 +662,16 @@
                view.target[2] + view.dist * se];
     gl.uniformMatrix4fv(uMVP, false, mul(perspective(FOVY, w / h, 0.05, 60),
                                          lookAt(eye, view.target, [0, 0, 1])));
-    gl.bindBuffer(gl.ARRAY_BUFFER, cur.p); gl.enableVertexAttribArray(AP); gl.vertexAttribPointer(AP, 3, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, cur.n); gl.enableVertexAttribArray(AN); gl.vertexAttribPointer(AN, 3, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, cur.c); gl.enableVertexAttribArray(AC); gl.vertexAttribPointer(AC, 3, gl.FLOAT, false, 0, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, cur.count);
+    /* 逐批画：每批顶点数都在 16 位索引范围内 */
+    var bs = mdl.batches;
+    for (var bi2 = 0; bi2 < bs.length; bi2++) {
+      var b2 = bs[bi2];
+      gl.bindBuffer(gl.ARRAY_BUFFER, b2.p); gl.enableVertexAttribArray(AP); gl.vertexAttribPointer(AP, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, b2.n); gl.enableVertexAttribArray(AN); gl.vertexAttribPointer(AN, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, b2.c); gl.enableVertexAttribArray(AC); gl.vertexAttribPointer(AC, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, b2.idx);
+      gl.drawElements(gl.TRIANGLES, b2.n, gl.UNSIGNED_SHORT, 0);
+    }
   }
 
   /* ---------- 6. 初始化 ---------- */
@@ -672,9 +699,9 @@
   }
   /* 画布尺寸变了（手机横竖屏、面板折起）就重新算一次取景 */
   window.addEventListener("resize", function () {
-    if (!cur) return;
+    if (!mdl) return;
     var w = CV.clientWidth;
-    if (Math.abs(w - lastW) > 2) { fitView(cur.xyz, Math.max(0.4, w / Math.max(1, CV.clientHeight))); lastW = w; }
+    if (Math.abs(w - lastW) > 2) { fitView(mdl.xyz, Math.max(0.4, w / Math.max(1, CV.clientHeight))); lastW = w; }
   });
 
   try { setModel(NAMES[1] || NAMES[0]); }
