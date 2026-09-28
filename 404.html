@@ -17,5 +17,15 @@
 </head>
 <body>
 <div id="root"></div>
+<script>
+  /* 404.html 专用：让 /work/xxx 这类深链落到前端路由上 */
+  (function () {
+    var l = location;
+    var path = l.pathname + l.search + l.hash;
+    if (l.pathname !== '/' && !/\.[a-z0-9]+$/i.test(l.pathname)) {
+      history.replaceState(null, '', '/?p=' + encodeURIComponent(path));
+    }
+  })();
+</script>
 </body>
 </html>

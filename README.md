@@ -1,35 +1,52 @@
-# 周新旭 · 个人作品集网站
+# luthetin.github.io
 
-## 怎么用
+个人作品集：独立开发者 / AI 设计师 / 自媒体博主 / 诗人 —— 周新旭（陆思鼎）。
 
-这个文件夹就是你的网站。双击 `index.html` 就能在浏览器里看。
+线上地址：<https://luthetin.github.io/>
 
-## 你只需要做两件事
+## 这个仓库里是什么
 
-1. **放照片**：把你国家植物园那张桃花照放到本文件夹里，
-   命名 `hero.jpg` 或 `photo.jpg`（放根目录或 `assets/images/` 里都行），
-   首页顶部的照片位就会自动显示。
+仓库根目录是 **构建产物**，不是源码。源码在本地 `Desktop/web-v2`（React 19 + Vite 8 + Tailwind v4 + GSAP）。
 
-2. **改佳句**：编辑 `assets/js/quotes.js`，里面的 `SITE_QUOTES`
-   数组就是首页粉色卡片轮播的句子，改完刷新页面即可。
+```
+index.html        首页（单页应用入口）
+404.html          SPA 深链回退（GitHub Pages 用 404.html 接住 /work/* 这类直达地址）
+assets/           打包后的 JS / CSS / 自托管字体（Geist、JetBrains Mono）
+hero.jpg          首屏与个人经历用的照片（同时作为 og:image）
+media/            首屏视频位：放入 hero.mp4 后自动播放，缺失时用 hero.jpg 当海报
+poetry.html       旧地址 → 200 跳转页（保留，避免别人收藏的老链接失效）
+projects.html     旧地址 → 200 跳转页
+explore-hub.html  旧地址 → 200 跳转页
+geostructure-builder.html  旧地址 → 200 跳转页
+```
 
-## 网站结构
+## 页面
 
-- `index.html`     首页（照片 → 渐变 → 粉色卡片轮播佳句 + 三栏）
-- `poetry.html`    诗歌（春潋集选 + 行吟集选）
-- `projects.html`  程序（项目列表：一个按钮一个项目）
-- `explore-hub.html`  探索台项目详情（从项目列表点进去）
-- `about.html`     关于（心路 + 信条）
-- `assets/`        样式、脚本、图片
+| 地址 | 内容 |
+| --- | --- |
+| `/` | 首页：全屏 Hero、个人经历、精选项目、个人优势、整屏收尾联系 |
+| `/work/code` | 程序：GeoStructure Builder、探索台 |
+| `/work/media` | 自媒体：B 站词牌科普与创作入门 |
+| `/work/poetry` | 诗歌：《春潋集》25 首、《行吟集》19 首，含序、跋、译文与注释 |
 
-## 上线（以后）
+## 怎么更新内容
 
-免费托管到 GitHub Pages，或用自定义域名。到时候再弄。
+改文案要改源码（`web-v2/src`），再构建并同步到本仓库：
 
-## 待办
+```bash
+cd Desktop/web-v2
+npm run build          # 产出 dist/
+npm run deploy:go      # 同步到 Desktop/web，自动 git add
+cd Desktop/web
+git commit -m "更新内容"
+git push
+```
 
-- [ ] 邮箱：把 `index.html` / `poetry.html` / `projects.html` / `about.html`
-      页脚里的 `your@email.com` 换成真实邮箱
-- [ ] GitHub / B 站链接换成真实主页
-- [ ] 简历 PDF 下载（可选）
-- [ ] 部署到 GitHub Pages / 买域名
+## 旧版站点
+
+旧版（纯静态 HTML）完整保留在 `classic-site` 分支，本地也有一份备份：
+
+```bash
+git checkout classic-site   # 看旧版
+git checkout main           # 回到线上版本
+```
