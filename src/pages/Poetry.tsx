@@ -154,13 +154,17 @@ function PoemItem({
   /* 展开：标题"涨大" + 正文逐行落字。
      标题的字号切换不能直接动画（font-size 不可动画，会逐帧重排），
      所以让标题直接渲染成大字尺寸（重排一次），再用 scale 0.66 → 1
-     把它从"小字的大小"平滑涨上去——视觉上就是在变大。 */
+     把它从"小字的大小"平滑涨上去——视觉上就是在变大。
+
+     ⚠ 依赖里只能有 isOpen。以前把 showTrans / showNotes 也放进来了，
+     结果每点一次"译文"就重播一遍整套入场动效（从无到有），
+     看起来像是页面重新加载了一次。译文/注释的显隐另有下面那条轻动效。 */
   useEffect(() => {
     const el = bodyRef.current;
     const titleEl = titleRef.current;
-    if (!el || !isOpen) return;
+    if (!isOpen) return;
 
-    if (!canAnimateDecor()) {
+    if (!canAnimateDecor() || !el) {
       if (titleEl) gsap.set(titleEl, { clearProps: 'transform,opacity' });
       return;
     }
@@ -188,7 +192,20 @@ function PoemItem({
     return () => {
       tl.kill();
     };
-  }, [isOpen, showTrans, showNotes]);
+  }, [isOpen]);
+
+  /* 译文 / 注释单独一条轻动效：只滑入自己那块，不碰整条诗。
+     这样点开时是"这一段出现了"，而不是"整首诗重来一遍"。 */
+  useEffect(() => {
+    if (!canAnimateDecor()) return;
+    const panes = bodyRef.current?.querySelectorAll('[data-pane]');
+    if (!panes?.length) return;
+    gsap.fromTo(
+      panes,
+      { y: 8, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.4, ease: 'power2.out', overwrite: 'auto' },
+    );
+  }, [showTrans, showNotes]);
 
   return (
     <li
@@ -299,7 +316,11 @@ function PoemItem({
             ) : null}
 
             {showTrans && transList.length ? (
-              <div data-tail className="measure mt-5 border-l border-accent/40 pl-5">
+              <div
+                data-tail
+                data-pane
+                className="measure mt-5 border-l border-accent/40 pl-5"
+              >
                 {transList.map((seg, i) => (
                   <p
                     key={`${seg}-${i}`}
@@ -312,7 +333,11 @@ function PoemItem({
             ) : null}
 
             {showNotes && p.notes ? (
-              <div data-tail className="measure mt-5 border-l border-accent/40 pl-5">
+              <div
+                data-tail
+                data-pane
+                className="measure mt-5 border-l border-accent/40 pl-5"
+              >
                 <p className="text-[0.86rem] leading-[1.95] text-muted">{p.notes}</p>
               </div>
             ) : null}
@@ -582,7 +607,9 @@ export default function Poetry() {
                         <ul>
                           {g.poems.map((p, i) => (
                             <li key={p.t} className="flex gap-3">
-                              {/* 刻度列：整十首的刻度更长，像目录的节标 */}
+                              {/* 刻度列：整十首的刻度更长，像目录的节标。
+                                  这条列只放刻度，序号在诗条内部隔开一段距离，
+                                  否则序号会贴在展开后的强调竖线上。 */}
                               <span
                                 aria-hidden="true"
                                 className="flex w-4 shrink-0 justify-end pt-[1.15rem]"
@@ -593,7 +620,7 @@ export default function Poetry() {
                                   }`}
                                 />
                               </span>
-                              <div className="min-w-0 flex-1">
+                              <div className="min-w-0 flex-1 pl-3">
                                 <PoemItem
                                   p={p}
                                   no={running + i + 1}

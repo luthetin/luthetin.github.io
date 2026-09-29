@@ -403,6 +403,9 @@
   /* 展开条目：左侧一根强调竖线 + 一次内发光（不用氛围光图层） */
   .poem-item {
     position: relative;
+    /* 左侧留出位置给强调竖线，序号才不会贴在线上 */
+    padding-left: 1.15rem;
+    padding-right: 0.25rem;
     transition: border-color 500ms ease, background-color 500ms ease, box-shadow 600ms ease;
   }
   .poem-item[data-open='true'] {
@@ -412,7 +415,7 @@
   .poem-item[data-open='true']::before {
     content: "";
     position: absolute;
-    left: -1px;
+    left: 0;
     top: 0.7rem;
     bottom: 0.7rem;
     width: 2px;
