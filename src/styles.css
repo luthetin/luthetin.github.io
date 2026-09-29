@@ -553,9 +553,20 @@
 }
 
 /* 只在 JS 已经跑起来时才隐藏待入场元素。
-   默认可见 = 任何"JS 慢/失败"的情况下内容都不会消失，这是内容优先的底线。 */
+   默认可见 = 任何"JS 慢/失败"的情况下内容都不会消失，这是内容优先的底线。
+
+   ⚠ 静态模式必须显式豁免：?still=1 时 js-anim 仍在，但入场动效会被停掉，
+   如果只写 .js-anim .js-fade{opacity:0}，副文就会永久停在 0（内容消失）。
+   同理 is-slow-device 也要豁免。 */
 .js-anim .js-fade { opacity: 0; }
 .js-anim [data-ch] { opacity: 0; }
+
+.still-mode .js-fade,
+.is-slow-device .js-fade,
+.still-mode [data-ch],
+.is-slow-device [data-ch] {
+  opacity: 1 !important;
+}
 
 /* 首页首屏不用 100vh，避免移动端地址栏导致跳动 */
 .min-h-screen-safe { min-height: 100dvh; }
