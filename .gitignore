@@ -1,0 +1,13 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 临时产物：截图、无头浏览器 profile、探针
+.shots*/
+.edge-profile*/
+.edge-probe*/
+.ab/
+*.log
+
+# 本地缓存
+.npm-cache/

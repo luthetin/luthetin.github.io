@@ -1,0 +1,572 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   周新旭 · 作品集（暗色重设计）
+   配色分层：底（蓝紫近黑，管纵深）→ 主（深玫瑰，管身份）→ 辅（各绑一个语义位置）
+   字体分工：Geist 管界面与中文正文，Bodoni MT 管英文展示，宋体只管诗
+   形状锁：全站容器与控件统一 2px 直角，只有语义上是"点"的地方用圆形
+   ========================================================================= */
+
+@theme {
+  --font-sans: "Geist Variable", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei",
+    "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-verse: "Noto Serif SC", "Songti SC", "STSong", "SimSun", "Source Han Serif SC", serif;
+  /* 英文展示用 didone 血统的高对比衬线：只用于大标题与巨大数字，不进正文 */
+  --font-display: "Bodoni MT", "Bodoni 72", "Didot", "Playfair Display", "Times New Roman", serif;
+
+  /* 第一层 · 底（带蓝紫倾向的近黑，制造纵深） */
+  --color-void: #08080a;
+  --color-ink: #0d0d11;
+  --color-surface: #131318;
+  --color-line: #232329;
+  --color-line-soft: #1a1a1f;
+  --color-text: #ededf0;
+  --color-muted: #8b8b93;
+  --color-faint: #5c5c64;
+
+  /* 第二层 · 主（粉，身份的锚） */
+  --color-accent: #e0708f;
+  --color-accent-deep: #a44f68;
+  --color-accent-light: #f3a0b6;
+
+  /* 第三层 · 辅（每个只出现在一个语义位置，合计不超过画面两成） */
+  --color-ice: #7fa8d8; /* 程序：数据、代码、网格高光 */
+  --color-teal: #4fb3a5; /* 状态：已开源 / 通过 / 在线 */
+  --color-amber: #e0a758; /* 诗与时间：诗句、日期、文献标记 */
+  --color-iris: #9a83d8; /* 氛围：WebGL 幕布与极光色偏，不落文字 */
+
+  --radius-tile: 2px;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-void);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-accent) 40%, transparent);
+    color: #fff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+
+  h1, h2, h3 {
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  img, video, canvas {
+    display: block;
+    max-width: 100%;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--color-void); }
+  ::-webkit-scrollbar-thumb { background: #24242b; border: 2px solid var(--color-void); }
+  ::-webkit-scrollbar-thumb:hover { background: #33333c; }
+}
+
+@layer components {
+  /* 版心：统一最大宽度与左右留白 */
+  .shell {
+    width: 100%;
+    max-width: 1400px;
+    margin-inline: auto;
+    padding-inline: 1.25rem;
+  }
+  @media (min-width: 768px) {
+    .shell { padding-inline: 2.5rem; }
+  }
+
+  /* 暗色玻璃面板（用于导航与浮层，不做卡片堆砌） */
+  .glass {
+    background: color-mix(in oklab, var(--color-void) 76%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+  }
+
+  .hairline { border-color: var(--color-line); }
+
+  .mono-label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.18em;
+    color: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+  }
+
+  /* 主/次按钮：直角、1px 描边、按下有物理回弹 */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.8125rem 1.375rem;
+    border-radius: var(--radius-tile);
+    font-size: 0.875rem;
+    line-height: 1;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    transition: background-color 220ms ease, border-color 220ms ease, color 220ms ease,
+      transform 120ms ease;
+  }
+  .btn:active { transform: translateY(1px); }
+
+  .btn-primary {
+    background: var(--color-accent);
+    color: #14060b;
+    font-weight: 600;
+  }
+  .btn-primary:hover { background: #ec85a1; }
+
+  .btn-ghost {
+    border-color: var(--color-line);
+    color: var(--color-text);
+  }
+  .btn-ghost:hover {
+    border-color: color-mix(in oklab, var(--color-accent) 60%, var(--color-line));
+    color: var(--color-accent);
+  }
+
+  /* 文本链接：下划线随 hover 从左展开 */
+  .link-underline {
+    position: relative;
+    display: inline-block;
+  }
+  .link-underline::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    height: 1px;
+    width: 100%;
+    background: currentColor;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .link-underline:hover::after { transform: scaleX(1); }
+
+  /* 章节标题：竖排堆叠，不做"左大标题 + 右小说明"的对照式头部 */
+  .section-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    max-width: 46rem;
+  }
+
+  .display {
+    font-weight: 700;
+    line-height: 1.06;
+    letter-spacing: -0.015em;
+  }
+
+  /* 英文展示体：didone 高对比衬线，只在英文大标题 / 巨大数字上使用。
+     中文不在这个字体栈里（会落到宋体），所以需要中文的标题不要加这个类。 */
+  .display-latin {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.005em;
+    font-feature-settings: "lnum" 1;
+  }
+
+  /* 中文衬线标题：与英文 didone 同一气质，避免"英文换了中文没换"的分裂 */
+  .display-serif-cn {
+    font-family: var(--font-verse);
+    font-weight: 600;
+    letter-spacing: 0.005em;
+  }
+
+  .verse {
+    font-family: var(--font-verse);
+    line-height: 2.05;
+    letter-spacing: 0.02em;
+  }
+
+  /* 阅读版心：中文正文按「字」计数而不是字符宽度。
+     34ch 对中文约等于 34 个字，是长文最舒服的行长；
+     全站所有正文必须从这里取，禁止再散落 34rem / 40rem / 42rem 各写一套。 */
+  .measure { max-width: 34ch; }
+  .measure-wide { max-width: 46ch; }
+  .measure-tight { max-width: 26ch; }
+
+  .prose-cjk p {
+    color: #c9c9d0;
+    line-height: 1.95;
+    margin-bottom: 1.15rem;
+  }
+  .prose-cjk p:last-child { margin-bottom: 0; }
+
+  /* ======================================================== 内容页版式族
+     一个页面里同一族最多用两次，避免"整页一种排版"的平。 */
+
+  /* 族一 · 大字拉引：把一句话放大到接近标题，作为视觉停顿 */
+  .pull-quote {
+    font-family: var(--font-verse);
+    font-weight: 600;
+    line-height: 1.42;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+  }
+
+  /* 族二 · 左竖线条目：技术文档式罗列，取代"到处是卡片" */
+  .rule-item {
+    position: relative;
+    padding-left: 1.15rem;
+  }
+  .rule-item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    bottom: 0.35em;
+    width: 1px;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-accent) 65%, transparent),
+      color-mix(in oklab, var(--color-accent) 8%, transparent)
+    );
+  }
+
+  /* 族三 · 全宽图版：示意图 / 线框铺满版心，带极淡的框与角标 */
+  .plate {
+    position: relative;
+    border: 1px solid var(--color-line);
+    background: linear-gradient(155deg, #14141b 0%, #0a0a0f 70%);
+  }
+  .plate::before,
+  .plate::after {
+    content: "";
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border-color: color-mix(in oklab, var(--color-accent) 60%, transparent);
+    pointer-events: none;
+  }
+  .plate::before { left: -1px; top: -1px; border-left: 1px solid; border-top: 1px solid; }
+  .plate::after { right: -1px; bottom: -1px; border-right: 1px solid; border-bottom: 1px solid; }
+  .plate-caption {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    color: var(--color-faint);
+  }
+
+  /* 卷次分隔：诗集按年份分卷时的"卷首"横线 */
+  .volume-rule {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
+    color: var(--color-muted);
+  }
+  .volume-rule::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, var(--color-line), transparent);
+  }
+
+  /* 竖排：只给"书名 / 卷名"这类 2–5 字的短元素用。
+     整首诗竖排会显著降低阅读体验，所以正文保持横排。 */
+  .vertical-cn {
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    font-family: var(--font-verse);
+    letter-spacing: 0.18em;
+  }
+}
+
+@layer utilities {
+  /* 胶片颗粒：纯 SVG 噪声，无外部图片 */
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* 技术感网格线：只在 Hero 用一次 */
+  .tech-grid::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+    background-size: 25% 100%;
+    mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 62%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 62%, transparent);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 44px color-mix(in oklab, var(--color-accent) 32%, transparent);
+  }
+
+  /* 程序卡片：技术网格 + 一道缓慢下扫的高光 */
+  .scan-grid {
+    background-image: linear-gradient(to right, rgba(255, 255, 255, 0.085) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.085) 1px, transparent 1px);
+    background-size: 34px 34px;
+  }
+  .scan-grid::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    height: 34%;
+    background: linear-gradient(to bottom, transparent, rgba(224, 112, 143, 0.38), transparent);
+    animation: scan-sweep 7s linear infinite;
+  }
+  @keyframes scan-sweep {
+    from { transform: translateY(-45%); }
+    to { transform: translateY(330%); }
+  }
+
+  /* 诗歌卡片：诗集标题缓缓上流（全站仅此一处跑马灯）
+     内容铺两遍 + 尾部补一个 gap（pb-5），位移正好走 1/2，接续处不会跳 */
+  .verse-marquee {
+    animation: verse-drift 60s linear infinite;
+  }
+  @keyframes verse-drift {
+    from { transform: translateY(0); }
+    to { transform: translateY(-50%); }
+  }
+
+  /* 优势行：hover 时顶部划出一根强调色细线 */
+  .adv-row { position: relative; }
+  .adv-row::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: -1px;
+    height: 1px;
+    background: var(--color-accent);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .adv-row:hover::before { transform: scaleX(1); }
+
+  /* ---------------------------------------------------------------- 纵深底
+     给区块铺一层极淡的蓝紫渐变。暗部不再只有一种黑，画面才有"空气"。 */
+  .depth {
+    background-image: linear-gradient(150deg, #1c1526 0%, #0a0a0f 62%, #08080a 100%);
+  }
+
+  /* ---------------------------------------------------------------- 极光
+     三团极慢漂移的软光。软边完全由径向渐变给出，不用 filter: blur
+     （大尺寸 blur 在软件渲染下会把合成器拖垮），动画只动 transform。
+
+     强度控制得很低：它是"照片上的一层光"，不是"一层颜色"。
+     峰值透明度只在个位数百分比，叠在暗底上刚好能看出呼吸，绝不会变浑。 */
+  .aurora {
+    position: absolute;
+    inset: -4%;
+    pointer-events: none;
+    overflow: hidden;
+    contain: paint;
+    opacity: 0.8;
+  }
+  .aurora i {
+    position: absolute;
+    display: block;
+    border-radius: 50%;
+    will-change: transform;
+    animation-name: aurora-drift;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+  }
+  .aurora-rose {
+    background: radial-gradient(circle, rgba(224, 112, 143, 0.3) 0%, rgba(224, 112, 143, 0.09) 40%, transparent 66%);
+  }
+  .aurora-iris {
+    background: radial-gradient(circle, rgba(154, 131, 216, 0.26) 0%, rgba(154, 131, 216, 0.08) 42%, transparent 68%);
+  }
+  .aurora-amber {
+    background: radial-gradient(circle, rgba(224, 167, 88, 0.18) 0%, rgba(224, 167, 88, 0.05) 44%, transparent 70%);
+  }
+  @keyframes aurora-drift {
+    from { transform: translate3d(0, 0, 0) scale(1); }
+    to { transform: translate3d(11%, 9%, 0) scale(1.16); }
+  }
+  .aurora-iris { animation-name: aurora-drift-b; }
+  @keyframes aurora-drift-b {
+    from { transform: translate3d(0, 0, 0) scale(1.08); }
+    to { transform: translate3d(-13%, -10%, 0) scale(0.94); }
+  }
+  .aurora-amber { animation-name: aurora-drift-c; }
+  @keyframes aurora-drift-c {
+    from { transform: translate3d(-6%, 5%, 0) scale(0.96); }
+    to { transform: translate3d(10%, -9%, 0) scale(1.12); }
+  }
+  /* 静态模式：停住动画并撤掉 will-change，渐变仍在 */
+  .aurora-static i {
+    animation: none !important;
+    will-change: auto;
+  }
+
+  /* ------------------------------------------------------------ 标题扫光
+     一层斜向高光缓慢扫过标题。用叠加层而不是给文字做渐变裁切，
+     因为标题每个字都是独立的 transform，背景裁切会被切成一段一段。 */
+  .sweep-layer { position: relative; }
+  .sweep-layer::after {
+    content: "";
+    position: absolute;
+    inset: -8% -12%;
+    pointer-events: none;
+    mix-blend-mode: screen;
+    opacity: 0.5;
+    background: linear-gradient(
+      100deg,
+      transparent 34%,
+      rgba(243, 160, 182, 0.5) 44%,
+      rgba(224, 167, 88, 0.4) 50%,
+      rgba(154, 131, 216, 0.34) 56%,
+      transparent 66%
+    );
+    background-size: 260% 100%;
+    animation: sweep 8.5s ease-in-out infinite;
+  }
+  @keyframes sweep {
+    0% { background-position: 160% 0; }
+    55%, 100% { background-position: -60% 0; }
+  }
+
+  /* -------------------------------------------------------- 主按钮呼吸光晕
+     只呼吸 opacity，不做缩放——缩放会让人觉得"按钮在抽动"。 */
+  .btn-glow { position: relative; isolation: isolate; }
+  .btn-glow::before {
+    content: "";
+    position: absolute;
+    inset: -55%;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(224, 112, 143, 0.55), transparent 72%);
+    animation: glow-breathe 4.6s ease-in-out infinite;
+  }
+  @keyframes glow-breathe {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 0.95; }
+  }
+
+  /* -------------------------------------------------------- 卡片描边点亮
+     进入视口时描边从 line 亮到 accent-deep，只播一次，不循环。 */
+  .card-lighting {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border: 1px solid var(--color-accent-deep);
+    opacity: 0;
+  }
+  .card-lighting.is-lit {
+    animation: card-light 1.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  @keyframes card-light {
+    0% { opacity: 0; box-shadow: 0 0 0 0 rgba(224, 112, 143, 0); }
+    35% { opacity: 1; box-shadow: 0 0 0 4px rgba(224, 112, 143, 0.07); }
+    100% { opacity: 0.75; box-shadow: 0 0 0 0 rgba(224, 112, 143, 0); }
+  }
+
+  /* 数字计数落定后的一次玫瑰色闪光 */
+  .num-flash { animation: num-flash 700ms ease-out; }
+  @keyframes num-flash {
+    0% { color: var(--color-accent); text-shadow: 0 0 22px rgba(224, 112, 143, 0.45); }
+    100% { color: inherit; text-shadow: none; }
+  }
+
+  /* 状态点：唯一使用 teal 的位置（已开源 / 通过 / 在线） */
+  .dot-live {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--color-teal);
+    box-shadow: 0 0 8px rgba(79, 179, 165, 0.7);
+  }
+
+  /* 静态模式 / 慢设备：装饰性动效整体停掉，但内容全部保持可见 */
+  .still-mode .aurora i,
+  .still-mode .sweep-layer::after,
+  .still-mode .btn-glow::before,
+  .still-mode .card-lighting.is-lit,
+  .is-slow-device .aurora i,
+  .is-slow-device .sweep-layer::after,
+  .is-slow-device .btn-glow::before,
+  .is-slow-device .card-lighting.is-lit {
+    animation: none !important;
+  }
+  .still-mode .aurora i,
+  .is-slow-device .aurora i {
+    will-change: auto;
+  }
+  /* 扫光是"移动的高光"，停掉动画后它会静止成一块亮斑，所以直接隐藏 */
+  .still-mode .sweep-layer::after,
+  .is-slow-device .sweep-layer::after {
+    display: none !important;
+  }
+  /* 呼吸光晕停掉后保留一个恒定光晕，按钮不至于失去"华丽" */
+  .still-mode .btn-glow::before,
+  .is-slow-device .btn-glow::before {
+    opacity: 0.6;
+  }
+  /* 卡片描边点亮停掉后直接呈现点亮态 */
+  .still-mode .card-lighting,
+  .is-slow-device .card-lighting {
+    opacity: 0.75;
+  }
+}
+
+/* GSAP SplitText 拆字容器：避免拆字后换行错位 */
+.split-parent .split-char,
+.split-parent .split-word,
+.split-parent .split-line {
+  display: inline-block;
+  will-change: transform, opacity;
+}
+
+/* 只在 JS 已经跑起来时才隐藏待入场元素。
+   默认可见 = 任何"JS 慢/失败"的情况下内容都不会消失，这是内容优先的底线。 */
+.js-anim .js-fade { opacity: 0; }
+.js-anim [data-ch] { opacity: 0; }
+
+/* 首页首屏不用 100vh，避免移动端地址栏导致跳动 */
+.min-h-screen-safe { min-height: 100dvh; }
+
+/* 尊重系统"减弱动效"：所有入场动效直接落定 */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .reveal-hidden { opacity: 1 !important; transform: none !important; }
+}

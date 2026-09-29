@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>主页升级方案 · 字体与配色（本机真实字体）</title>
+<style>
+  :root {
+    --void:#08080a; --ink:#0d0d11; --surface:#131318; --line:#232329;
+    --text:#ededf0; --muted:#8b8b93; --faint:#5c5c64;
+    --accent:#e0708f; --accent-deep:#a44f68; --accent-light:#f3a0b6;
+    --ice:#7fa8d8; --teal:#4fb3a5; --amber:#e0a758; --iris:#9a83d8;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--void); color:var(--text);
+    font-family:'Geist Variable','PingFang SC','Microsoft YaHei',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1200px; margin:0 auto; padding:44px 40px 70px; }
+  h1.page { font-size:28px; font-weight:600; letter-spacing:-.02em; margin:0 0 10px; }
+  .lede { color:var(--muted); font-size:13.5px; line-height:1.85; margin:0 0 8px; max-width:52rem; }
+  .lede b { color:var(--text); }
+  .sect { margin-top:52px; }
+  .sect-h { font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:.2em; color:var(--accent); margin:0 0 6px; }
+  .sect-t { font-size:18px; font-weight:600; margin:0 0 8px; }
+  .sect-d { color:var(--muted); font-size:12.5px; line-height:1.85; margin:0 0 22px; max-width:54rem; }
+  .sect-d b { color:var(--text); }
+
+  .row { border-top:1px solid var(--line); padding:16px 0 18px; }
+  .row.bad { border-top:2px solid var(--accent-deep); }
+  .hd { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .tag { font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.14em; padding:3px 7px; border:1px solid var(--line); color:var(--muted); }
+  .tag.no { border-color:var(--accent); color:var(--accent); }
+  .tag.pick { border-color:var(--teal); color:var(--teal); }
+  .fname { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--faint); }
+  .sample { font-size:44px; line-height:1.14; letter-spacing:-.012em; }
+  .sample .cn { font-family:'Noto Serif SC',serif; }
+  .meta { color:var(--faint); font-size:11px; font-family:'JetBrains Mono',monospace; margin-top:9px; }
+  .verdict { color:var(--muted); font-size:12.5px; margin-top:5px; line-height:1.75; }
+  .verdict b { color:var(--text); font-weight:600; }
+
+  .pal { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; }
+  .sw { border:1px solid var(--line); }
+  .chip { height:70px; }
+  .sw .info { padding:9px 11px 11px; background:var(--ink); }
+  .sw .nm { font-size:12px; font-weight:600; }
+  .sw .hx { font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--faint); margin-top:3px; }
+  .sw .use { font-size:11px; color:var(--muted); margin-top:5px; line-height:1.5; }
+  .ratio { display:flex; height:32px; border:1px solid var(--line); margin-top:8px; }
+  .ratio div { display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1 class="page">主页升级方案 · 字体与配色</h1>
+  <p class="lede">
+    这张图里的<b>每一个字体都是这台电脑上真实装着的</b>，所以你现在看到的就是最终效果，不存在"下载了才发现不一样"。
+    配色部分同理，色块都是真实色值。
+  </p>
+
+  <!-- ============ 字体 ============ -->
+  <div class="sect">
+    <p class="sect-h">01 / TYPOGRAPHY</p>
+    <h2 class="sect-t">英文字体（以及中文标题要不要一起换）</h2>
+    <p class="sect-d">
+      先说结论：<b>Times New Roman 我建议不用</b>，理由在第一条。但你想换衬线这个方向是对的——
+      衬线确实是"高级感"最直接的来源之一。下面是本机能用的备选，按我的推荐度排。
+      注意每一条都是<b>英文衬线 + Noto Serif SC（中文衬线）</b>的组合，因为中英并置时两者必须搭得上。
+    </p>
+
+    <div class="row bad">
+      <div class="hd">
+        <span class="tag no">不推荐</span>
+        <span class="fname">Times New Roman</span>
+      </div>
+      <div class="sample" style="font-family:'Times New Roman',serif;">
+        Zhou Xinxu <span class="cn">写代码，也写诗</span>
+      </div>
+      <div class="meta">1931 年 · 为报纸正文小字设计 · 浏览器默认衬线字体 · Monotype 商业字体</div>
+      <div class="verdict">
+        <b>问题一（致命）</b>：它是所有浏览器的默认衬线体。它出现的地方，读者读到的是"这个人没设字体"，而不是"这个人选了字体"——<b>它传递的信号正好和你要的相反</b>。
+        <b>问题二</b>：笔画对比只在正文小字号成立，放大到 44px 就变得单薄无力。
+        <b>问题三</b>：中英并置时它的 x-height 偏小，和中文方正的字面放在一起，英文会显得"缩"下去。
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="hd">
+        <span class="tag pick">首选</span>
+        <span class="fname">Bodoni MT + Noto Serif SC</span>
+      </div>
+      <div class="sample" style="font-family:'Bodoni MT',serif;">
+        Zhou Xinxu <span class="cn">写代码，也写诗</span>
+      </div>
+      <div class="meta">随 Windows 分发 · 无需下载 · 极致粗细对比（didone 血统）</div>
+      <div class="verdict">
+        <b>这就是"华丽"的字面答案。</b>Bodoni 是 18 世纪意大利印刷世家 Bodoni 的高对比字体，横细竖粗反差极大，在暗底上像被一束光打着。
+        <b>配合 Noto Serif SC 的中文，整屏立刻从"工程师"变成"出版物"。</b>
+        <b>注意</b>：只用于大标题与巨大数字，不要用于正文（细笔画在小字号会断）。
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="hd">
+        <span class="tag">次选 · 更柔和</span>
+        <span class="fname">Baskerville Old Face + Noto Serif SC</span>
+      </div>
+      <div class="sample" style="font-family:'Baskerville Old Face',serif;">
+        Zhou Xinxu <span class="cn">写代码，也写诗</span>
+      </div>
+      <div class="meta">随 Windows 分发 · 过渡期衬线 · 笔画更均匀、更"古典"</div>
+      <div class="verdict">
+        比 Bodoni 温和、比 Times 有教养。如果你的"华丽"想要的是<b>书卷气</b>而不是<b>戏剧感</b>，选这个。
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="hd">
+        <span class="tag">次选 · 更现代</span>
+        <span class="fname">Sitka Display + Noto Serif SC</span>
+      </div>
+      <div class="sample" style="font-family:'Sitka Display',serif;">
+        Zhou Xinxu <span class="cn">写代码，也写诗</span>
+      </div>
+      <div class="meta">随 Windows 10+ 分发 · 微软为屏幕显示做的展示衬线 · 有语义化字重</div>
+      <div class="verdict">
+        专门为"屏幕上大字"设计，所以暗底抗锯齿最好、最干净。<b>折中方案</b>：有衬线的品位，但不那么"古"。
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="hd">
+        <span class="tag">当前</span>
+        <span class="fname">Geist Variable（无衬线，线上正在用）</span>
+      </div>
+      <div class="sample" style="font-family:'Geist Variable',sans-serif; font-weight:600;">
+        Zhou Xinxu <span class="cn" style="font-family:'Geist Variable','PingFang SC',sans-serif;">写代码，也写诗</span>
+      </div>
+      <div class="meta">自托管 · 与中文黑体同族，中英并置重心最齐</div>
+      <div class="verdict">
+        现在的方案。克制、工程师。如果你想更华丽，它确实给不出——换衬线是对的，只是别换 Times。
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 配色 ============ -->
+  <div class="sect">
+    <p class="sect-h">02 / PALETTE</p>
+    <h2 class="sect-t">配色：粉 + 黑做骨架，靠"辅色分层"而不是"多上颜色"</h2>
+    <p class="sect-d">
+      你觉得单调，我判断真正的原因不是颜色少，而是<b>暗部只有一种冷黑、亮部只有一种粉，中间没有层</b>。
+      所以不是往上堆颜色，而是分三层：底（近黑蓝紫，管纵深）→ 主（粉，管身份，占视觉重量最多）→
+      辅（每个只绑一个语义位置，管呼吸感）。辅色加起来不超过两成，就不会花。
+    </p>
+
+    <p class="sect-h" style="color:var(--faint); margin:0 0 12px;">第一层 · 底（带蓝紫，让暗部有纵深）</p>
+    <div class="pal">
+      <div class="sw"><div class="chip" style="background:#08080a"></div><div class="info"><div class="nm">void</div><div class="hx">#08080a</div><div class="use">页面底（不变）</div></div></div>
+      <div class="sw"><div class="chip" style="background:#0d0d11"></div><div class="info"><div class="nm">ink</div><div class="hx">#0d0d11</div><div class="use">次级面（不变）</div></div></div>
+      <div class="sw"><div class="chip" style="background:#131318"></div><div class="info"><div class="nm">surface</div><div class="hx">#131318</div><div class="use">卡片面（不变）</div></div></div>
+      <div class="sw"><div class="chip" style="background:linear-gradient(150deg,#1c1526,#0a0a0f)"></div><div class="info"><div class="nm">depth · 新增</div><div class="hx">#1c1526 → #0a0a0f</div><div class="use">区块背景渐变，暗部开始有"空气"</div></div></div>
+    </div>
+
+    <p class="sect-h" style="color:var(--accent); margin:22px 0 12px;">第二层 · 主（粉，身份的锚）</p>
+    <div class="pal">
+      <div class="sw"><div class="chip" style="background:#e0708f"></div><div class="info"><div class="nm">accent</div><div class="hx">#e0708f</div><div class="use">主按钮 / 强调（不变）</div></div></div>
+      <div class="sw"><div class="chip" style="background:#a44f68"></div><div class="info"><div class="nm">accent-deep</div><div class="hx">#a44f68</div><div class="use">次级粉 / 描边（不变）</div></div></div>
+      <div class="sw"><div class="chip" style="background:#f3a0b6"></div><div class="info"><div class="nm">accent-light · 新增</div><div class="hx">#f3a0b6</div><div class="use">高光描边、hover 提亮</div></div></div>
+      <div class="sw"><div class="chip" style="background:radial-gradient(circle at 38% 38%,#e0708f,#7a2f45 72%)"></div><div class="info"><div class="nm">rose-glow · 新增</div><div class="hx">径向发光</div><div class="use">按钮/文字背后的光晕，是"华丽"的主要来源</div></div></div>
+    </div>
+
+    <p class="sect-h" style="color:var(--faint); margin:22px 0 12px;">第三层 · 辅（每个只出现在一个位置）</p>
+    <div class="pal">
+      <div class="sw"><div class="chip" style="background:#7fa8d8"></div><div class="info"><div class="nm">ice · 新增</div><div class="hx">#7fa8d8</div><div class="use">程序方向：数据、代码、网格高光</div></div></div>
+      <div class="sw"><div class="chip" style="background:#4fb3a5"></div><div class="info"><div class="nm">teal · 新增</div><div class="hx">#4fb3a5</div><div class="use">"已开源 / 通过 / 在线"这类状态</div></div></div>
+      <div class="sw"><div class="chip" style="background:#e0a758"></div><div class="info"><div class="nm">amber · 新增</div><div class="hx">#e0a758</div><div class="use">诗句、时间、文献类标记</div></div></div>
+      <div class="sw"><div class="chip" style="background:#9a83d8"></div><div class="info"><div class="nm">iris · 新增</div><div class="hx">#9a83d8</div><div class="use">WebGL 幕布色偏，只做氛围、不落文字</div></div></div>
+    </div>
+
+    <p class="sect-h" style="color:var(--faint); margin:26px 0 10px;">配比（"华丽但不花"的关键就在这）</p>
+    <div class="ratio">
+      <div style="width:62%;background:#0e0e13;color:#5c5c64;">底 62%</div>
+      <div style="width:21%;background:#e0708f;color:#3a0d1a;">粉 21%</div>
+      <div style="width:9%;background:#7fa8d8;color:#0a1524;">冰蓝 9%</div>
+      <div style="width:5%;background:#4fb3a5;color:#04241f;">青 5%</div>
+      <div style="width:3%;background:#e0a758;color:#2a1a05;">琥珀 3%</div>
+    </div>
+    <p class="sect-d" style="margin-top:14px;">
+      辅色合计 <b>17%</b>，每个都绑死一个语义位置：冰蓝=程序、青=状态、琥珀=诗与时间、鸢尾=氛围。
+      <b>不做"哪里好看就撒一点"</b>——那才是花。有了这层，暗部不再只是黑，粉也不再是孤零零一种粉。
+    </p>
+  </div>
+
+</div>
+</body>
+</html>
