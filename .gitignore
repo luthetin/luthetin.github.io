@@ -2,12 +2,18 @@
 node_modules/
 dist/
 
-# 临时产物：截图、无头浏览器 profile、探针
-.shots*/
-.edge-profile*/
-.edge-probe*/
+# 无头浏览器 profile（每次自动化运行都会生成，数量大且含会话数据）
+.edge-*/
+
+# 临时产物：截图、A/B 对比、探针
+.shots-*/
 .ab/
+.verify/
+
+# 本地缓存与日志
+.npm-cache/
 *.log
 
-# 本地缓存
-.npm-cache/
+# 系统文件
+Thumbs.db
+Desktop.ini
