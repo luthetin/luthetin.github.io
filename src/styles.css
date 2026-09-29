@@ -354,18 +354,6 @@
     background-attachment: fixed;
     background-repeat: repeat;
   }
-  /* 氛围光：同样锚定视口，避免整页图层与内容叠出杂线 */
-  .aura {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: -2;
-    background:
-      radial-gradient(58% 42% at 84% 6%, rgba(224, 112, 143, 0.13), transparent 62%),
-      radial-gradient(52% 40% at 8% 74%, rgba(224, 167, 88, 0.075), transparent 64%),
-      radial-gradient(64% 46% at 52% 108%, rgba(154, 131, 216, 0.085), transparent 66%);
-    background-attachment: fixed;
-  }
 
   /* ============================================== 诗条：折叠小字 / 展开大字 */
   .poem-head {
@@ -386,50 +374,57 @@
     color: #c9c9d0;
     transition: color 320ms ease;
     text-wrap: balance;
+    transform-origin: left center;
+    will-change: transform;
   }
   .poem-head:hover .poem-title { color: var(--color-accent); }
   .poem-head:hover .poem-no { color: var(--color-accent); }
 
-  /* 展开后标题变大字：这是整页最明显的排版事件 */
+  /* 展开后标题变大字。字号的切换由 GSAP 用 scale 动画完成
+     （font-size 不可动画，会逐帧重排），这里只负责最终尺寸与颜色。 */
   .poem-title.is-open {
-    font-size: clamp(1.55rem, 3.6vw, 2.5rem);
+    font-size: clamp(1.6rem, 3.8vw, 2.6rem);
     font-weight: 600;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.012em;
     color: var(--color-text);
-    line-height: 1.2;
+    line-height: 1.18;
   }
-  /* 展开后的卡片：左侧一根强调竖线 + 一次柔和的外发光。
-     这是"展开"这个动作在视觉上的回报，也是全页唯一发光的地方。 */
+
+  /* 竖排落款：展开时贴在标题右侧，像稿纸边上的题款 */
+  .poem-side {
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    font-family: var(--font-verse);
+    font-size: 0.72rem;
+    letter-spacing: 0.22em;
+    color: var(--color-faint);
+  }
+
+  /* 展开条目：左侧一根强调竖线 + 一次内发光（不用氛围光图层） */
   .poem-item {
     position: relative;
     transition: border-color 500ms ease, background-color 500ms ease, box-shadow 600ms ease;
   }
   .poem-item[data-open='true'] {
-    box-shadow: inset 0 0 60px color-mix(in oklab, var(--color-accent) 5%, transparent);
+    background: linear-gradient(to right, #0e0b12 0%, #0b0b10 46%, #0a0a0f 100%);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-accent) 12%, transparent);
   }
   .poem-item[data-open='true']::before {
     content: "";
     position: absolute;
     left: -1px;
-    top: 0.9rem;
-    bottom: 0.9rem;
+    top: 0.7rem;
+    bottom: 0.7rem;
     width: 2px;
     background: linear-gradient(
       to bottom,
-      color-mix(in oklab, var(--color-accent) 80%, transparent),
-      color-mix(in oklab, var(--color-amber) 42%, transparent) 60%,
+      color-mix(in oklab, var(--color-accent) 85%, transparent),
+      color-mix(in oklab, var(--color-amber) 45%, transparent) 62%,
       transparent
     );
   }
-  /* 展开后的引号装饰：长文标题旁的一个"开引号"，撑开版面的同时不抢字 */
-  .poem-open-mark {
-    font-family: var(--font-display);
-    font-size: clamp(2.6rem, 6vw, 4.5rem);
-    line-height: 0.6;
-    color: color-mix(in oklab, var(--color-accent) 40%, transparent);
-    user-select: none;
-  }
-  /* 落款 + 印章：两句宋词下面该有的东西 */
+
+  /* 落款 + 印章 */
   .poem-sign {
     font-family: var(--font-verse);
     font-size: 0.8rem;
@@ -455,6 +450,62 @@
   .poem-line {
     display: block;
     line-height: 2.05;
+  }
+
+
+  /* ========================================== 边栏：连续编号 + 年份跨距
+     这一列是"书的结构"：左侧贯穿的序号线，右侧按年份分段。
+     它不是装饰——它让 44 首的位置感有了度量。 */
+  .index-rail {
+    display: flex;
+    gap: 0.9rem;
+  }
+  .index-rail-line {
+    position: relative;
+    width: 1px;
+    flex: none;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      var(--color-line) 7%,
+      var(--color-line) 93%,
+      transparent
+    );
+  }
+  .index-year {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    line-height: 1.1;
+    color: color-mix(in oklab, var(--color-accent-light) 72%, transparent);
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+  }
+  .index-num {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--color-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  /* 每首诗的间隔刻度：短横线，长度随"整十首"变长 */
+  .index-tick {
+    display: block;
+    height: 1px;
+    background: var(--color-line);
+  }
+  .index-tick.is-decade { width: 1.1rem; background: var(--color-muted); }
+  .index-tick.is-plain { width: 0.5rem; }
+  /* 卷首：年份大字 + 一条贯穿的横线 */
+  .volume-head {
+    display: flex;
+    align-items: baseline;
+    gap: 1.1rem;
+  }
+  .volume-head::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    align-self: center;
+    background: linear-gradient(to right, var(--color-line), transparent);
   }
 }
 

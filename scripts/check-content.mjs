@@ -53,7 +53,10 @@ const EXPR = `(() => {
     svg: !!q('svg[role="img"]'),
     canvasPainted,
     years: [...document.querySelectorAll('[data-year]')].map((e) => e.getAttribute('data-year')),
-    volumeRules: document.querySelectorAll('.volume-rule').length,
+    volumeRules: document.querySelectorAll('.volume-head').length,
+    /* 边栏序号系统：连续编号列 + 每年一个卷首 + 每首一个刻度 */
+    indexRail: !!document.querySelector('.index-rail'),
+    indexTicks: document.querySelectorAll('.index-tick').length,
     ruleItems: document.querySelectorAll('.rule-item').length,
     pullQuotes: document.querySelectorAll('.pull-quote').length,
     /* 只数"真正可见"的竖排元素：容器可能用 hidden md:grid 隐藏，
@@ -127,6 +130,11 @@ try {
     /* 竖排是刻意只在桌面出现的：竖排在窄屏会把 2–5 字压得过小，反而更差 */
     check(`[${vp.name}] 诗歌页扉页竖排书名`, vp.w < 700 ? d.verticalCn === 0 : d.verticalCn >= 1, `vertical=${d.verticalCn}`);
     check(`[${vp.name}] 卷次分隔齐全（2022–2025）`, d.years.length === 4 && d.volumeRules === 4, `years=${d.years.join(',')} rules=${d.volumeRules}`);
+    check(
+      `[${vp.name}] 边栏序号系统（连续编号列 + 刻度）`,
+      d.indexRail && d.indexTicks === 25,
+      `rail=${d.indexRail} ticks=${d.indexTicks}`,
+    );
     const poems = await ev(`document.querySelectorAll('[data-poem]').length`);
     check(`[${vp.name}] 诗条 25 首`, poems === 25, `${poems} 条`);
     check(`[${vp.name}] 诗歌页无隐藏内容`, d.hidden.length === 0, d.hidden.join(', ') || '(无)');

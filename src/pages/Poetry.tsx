@@ -144,28 +144,47 @@ function PoemItem({
   onTogglePanel: (kind: string) => void;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLSpanElement>(null);
   const hasTrans = Array.isArray(p.trans)
     ? p.trans.length > 0
     : typeof p.trans === 'string' && p.trans.length > 0;
   const transList = Array.isArray(p.trans) ? p.trans : p.trans ? [p.trans] : [];
   const sign = signOf(p);
 
-  /* 展开：正文逐行落字。只动 transform/opacity，且只在这一首上跑一次。
-     正文不做逐字动画——那是装饰，会干扰读诗。 */
+  /* 展开：标题"涨大" + 正文逐行落字。
+     标题的字号切换不能直接动画（font-size 不可动画，会逐帧重排），
+     所以让标题直接渲染成大字尺寸（重排一次），再用 scale 0.66 → 1
+     把它从"小字的大小"平滑涨上去——视觉上就是在变大。 */
   useEffect(() => {
     const el = bodyRef.current;
-    if (!el || !isOpen || !canAnimateDecor()) return;
+    const titleEl = titleRef.current;
+    if (!el || !isOpen) return;
+
+    if (!canAnimateDecor()) {
+      if (titleEl) gsap.set(titleEl, { clearProps: 'transform,opacity' });
+      return;
+    }
+
     const tl = gsap.timeline();
+    if (titleEl) {
+      tl.fromTo(
+        titleEl,
+        { scale: 0.66, opacity: 0.35, y: 6 },
+        { scale: 1, opacity: 1, y: 0, duration: 0.62, ease: 'power3.out' },
+      );
+    }
     tl.fromTo(
       el.querySelectorAll('[data-line]'),
-      { y: 14, opacity: 0 },
-      { y: 0, opacity: 1, duration: 0.5, stagger: 0.045, ease: 'power2.out' },
+      { y: 16, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.5, stagger: 0.05, ease: 'power2.out' },
+      '-=0.34',
     ).fromTo(
       el.querySelectorAll('[data-tail]'),
-      { x: -8, opacity: 0 },
+      { x: -10, opacity: 0 },
       { x: 0, opacity: 1, duration: 0.45, stagger: 0.08, ease: 'power2.out' },
       '-=0.2',
     );
+
     return () => {
       tl.kill();
     };
@@ -187,7 +206,15 @@ function PoemItem({
       >
         <span className="flex min-w-0 flex-1 items-start gap-4">
           <span className="poem-no pt-[0.45em]">{String(no).padStart(2, '0')}</span>
-          <span className={`poem-title ${isOpen ? 'is-open' : ''}`}>{p.t}</span>
+          <span ref={titleRef} className={`poem-title ${isOpen ? 'is-open' : ''}`}>
+            {p.t}
+          </span>
+          {/* 展开时右侧出现竖排题款，像稿纸边上的小字 */}
+          {isOpen ? (
+            <span aria-hidden="true" className="poem-side ml-2 hidden self-stretch md:block">
+              陆思鼎
+            </span>
+          ) : null}
         </span>
 
         <span className="flex shrink-0 items-center gap-2 pt-[0.55em]">
@@ -394,9 +421,9 @@ export default function Poetry() {
       title="诗歌"
       meta={`《春潋集》${countPoems(BOOKS.chunlian)} 首 · 《行吟集》${countPoems(BOOKS.xingyin)} 首 · 合计 ${total} 首 · 含序、跋与白话译文`}
     >
-      {/* 纸张层：噪声 + 界格 + 氛围光。整页共用一层，不再各页各写一套 */}
+      {/* 纸张层：噪声颗粒 + 竖排界格。没有氛围光——
+          实测那层径向光只是在暗部糊出不均匀色斑，不如干净的暗面。 */}
       <div className="paper ruled relative">
-        <div aria-hidden="true" className="aura" />
 
         <div ref={pageRef}>
           {/* ======================= 扉页 ======================= */}
@@ -527,57 +554,79 @@ export default function Poetry() {
                 <span className="mono-label">{countPoems(b)} 首</span>
               </div>
 
-              <ul className="mt-10 flex flex-col gap-12">
-                {b.groups.map((g) => {
-                  let running = 0;
-                  /* 全局序号：跨卷连续，诗集的条目本来就该连续编号 */
-                  for (const gg of b.groups) {
-                    if (gg === g) break;
-                    running += gg.poems.length;
-                  }
+              {/* 连续编号 + 年份跨距：左侧一列贯穿的序号与年份，
+                  每首诗一行刻度。它不是装饰——44 首的位置感靠它度量。 */}
+              <div className="index-rail mt-10">
+                <div className="index-rail-line" aria-hidden="true" />
 
-                  return (
-                    <li key={g.year ?? 'ungrouped'} data-volume>
-                      {g.year ? (
-                        <div data-year={g.year} className="volume-rule scroll-mt-24">
-                          <span className="volume-year">{g.year}</span>
-                          <span className="volume-count">{g.poems.length} 首</span>
-                        </div>
-                      ) : null}
-
-                      <ul className="mt-1">
-                        {g.poems.map((p, i) => (
-                          <PoemItem
-                            key={p.t}
-                            p={p}
-                            no={running + i + 1}
-                            isOpen={!!open[poemKey(book, p.t)]}
-                            showTrans={!!panels[panelKey(book, p.t, 'trans')]}
-                            showNotes={!!panels[panelKey(book, p.t, 'notes')]}
-                            onToggle={() => togglePoem(p.t)}
-                            onTogglePanel={(kind) => togglePanel(p.t, kind)}
-                          />
-                        ))}
-                      </ul>
-                    </li>
-                  );
-                })}
-              </ul>
-
-              {b.outro ? (
-                <ul className="mt-14 border-t border-line pt-2">
-                  <EssayBlock
-                    essay={b.outro}
-                    open={!!open[poemKey(book, b.outro.title)]}
-                    onToggle={() =>
-                      setOpen((m) => ({
-                        ...m,
-                        [poemKey(book, b.outro!.title)]: !m[poemKey(book, b.outro!.title)],
-                      }))
+                <div className="min-w-0 flex-1">
+                  {b.groups.map((g) => {
+                    let running = 0;
+                    for (const gg of b.groups) {
+                      if (gg === g) break;
+                      running += gg.poems.length;
                     }
-                  />
-                </ul>
-              ) : null}
+
+                    return (
+                      <div key={g.year ?? 'ungrouped'} data-volume className="mb-11 last:mb-0">
+                        {g.year ? (
+                          <div
+                            data-year={g.year}
+                            className="volume-head scroll-mt-24 mb-2 flex items-center gap-4"
+                          >
+                            <span className="volume-year">{g.year}</span>
+                            <span className="volume-count">{g.poems.length} 首</span>
+                          </div>
+                        ) : null}
+
+                        <ul>
+                          {g.poems.map((p, i) => (
+                            <li key={p.t} className="flex gap-3">
+                              {/* 刻度列：整十首的刻度更长，像目录的节标 */}
+                              <span
+                                aria-hidden="true"
+                                className="flex w-4 shrink-0 justify-end pt-[1.15rem]"
+                              >
+                                <span
+                                  className={`index-tick ${
+                                    (running + i + 1) % 10 === 0 ? 'is-decade' : 'is-plain'
+                                  }`}
+                                />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <PoemItem
+                                  p={p}
+                                  no={running + i + 1}
+                                  isOpen={!!open[poemKey(book, p.t)]}
+                                  showTrans={!!panels[panelKey(book, p.t, 'trans')]}
+                                  showNotes={!!panels[panelKey(book, p.t, 'notes')]}
+                                  onToggle={() => togglePoem(p.t)}
+                                  onTogglePanel={(kind) => togglePanel(p.t, kind)}
+                                />
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
+
+                  {b.outro ? (
+                    <ul className="mt-14 border-t border-line pt-2">
+                      <EssayBlock
+                        essay={b.outro}
+                        open={!!open[poemKey(book, b.outro.title)]}
+                        onToggle={() =>
+                          setOpen((m) => ({
+                            ...m,
+                            [poemKey(book, b.outro!.title)]: !m[poemKey(book, b.outro!.title)],
+                          }))
+                        }
+                      />
+                    </ul>
+                  ) : null}
+                </div>
+              </div>
             </div>
           </div>
         </div>
