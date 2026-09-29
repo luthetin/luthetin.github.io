@@ -4,19 +4,21 @@ import { CaretDown } from '@phosphor-icons/react';
 import DetailShell from '../components/DetailShell';
 import { POEMS } from '../data/poems.js';
 import { SITE_QUOTES } from '../data/quotes.js';
-import { gsap, MOTION } from '../lib/motion';
+import { gsap, MOTION, canAnimateDecor } from '../lib/motion';
 
 /* ----------------------------------------------------------------------------
    诗歌方向详情：一本打开的书
 
-   三个关键改动（之前是一张平铺列表，44 首读起来没有位置感）：
-   1) 扉页：竖排书名 + 署名 + 年代跨度 + 序文。竖排只用在书名这类 2–5 字短元素上，
-      正文保持横排（整首诗竖排会明显降低阅读体验）。
-   2) 卷次：年份从灰色小字升级为「卷首」分隔，右侧标该年首数；左侧吸附显示当前卷。
-   3) 位置感：左侧卷次刻度随滚动点亮，并显示「已展开几首」的微弱进度。
+   设计取舍（重要）：诗的正文必须安静，华丽只放在"外壳"上。
+   所以动效集中在这四处，正文本身不做逐字动画：
+   1) 纸张：噪声颗粒 + 竖排界格（乌丝栏）+ 极弱氛围光 —— 解决"只有一种黑"
+   2) 折叠 / 展开的排版反差：收起是 1.02rem 的灰字，展开跳成 2.5rem 大字，
+      配开引号、序号、落款与印章 —— 这是整页最明显的排版事件
+   3) 展开时正文逐行落字 + 译文/注释从左侧滑入
+   4) 扉页：竖排发光书名 + 印章 + 年代跨度；卷次年份用大号展示体
 
    交互与旧站一致：选集 → 目录 → 条目就地展开（可多开）→ 译文/注释点开才显示，
-   并保留从首页佳句跳过来的 ?poem=诗名 深链。
+   并保留 ?poem=诗名 深链。所有动效受 reduced / still / 慢设备三级降级。
    -------------------------------------------------------------------------- */
 
 type Poem = {
@@ -42,6 +44,12 @@ function countPoems(b: Book) {
   return b.groups.reduce((sum, g) => sum + g.poems.length, 0);
 }
 
+/* 落款：从正文里取末句的头几个字，像手稿末尾的题识 */
+function signOf(p: Poem) {
+  const last = p.body[p.body.length - 1] ?? '';
+  return last.replace(/[，。、；？！,.]/g, ' ').trim().split(/\s+/)[0]?.slice(0, 4) ?? '';
+}
+
 /* ------------------------------------------------------------- 佳句轮播 */
 function QuoteStrip() {
   const [i, setI] = useState(0);
@@ -57,8 +65,7 @@ function QuoteStrip() {
   useEffect(() => {
     const el = ref.current;
     if (!el || MOTION.reduced) return;
-    /* 换句时只做位移与轻微模糊，绝不动 opacity：
-       文字一旦被压到 0，在换句的瞬间就是"内容消失了"。 */
+    /* 换句只做位移与轻微模糊，绝不动 opacity：文字不该在换句瞬间消失 */
     gsap.fromTo(
       el,
       { y: 10, filter: 'blur(3px)' },
@@ -79,27 +86,210 @@ function QuoteStrip() {
 
 /* --------------------------------------------------------------- 序 / 跋 */
 function EssayBlock({ essay, open, onToggle }: { essay: Essay; open: boolean; onToggle: () => void }) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || !open || !canAnimateDecor()) return;
+    gsap.fromTo(
+      el.querySelectorAll('[data-para]'),
+      { y: 10, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.5, stagger: 0.07, ease: 'power2.out' },
+    );
+  }, [open]);
+
   return (
     <li className="border-b border-line-soft">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-4 py-4 text-left"
+        className="group flex w-full items-center justify-between gap-4 py-4 text-left"
       >
-        <span className="verse text-[1rem] transition-colors duration-200 hover:text-accent">
+        <span className="verse text-[1rem] transition-colors duration-200 group-hover:text-accent">
           {essay.title}
         </span>
         <span className="mono-label">{open ? '收起' : '展开'}</span>
       </button>
       {open ? (
-        <div className="measure pb-8">
+        <div ref={bodyRef} className="measure pb-8">
           {essay.paras.map((p) => (
-            <p key={p} className="mb-4 text-[0.9rem] leading-[1.95] text-muted last:mb-0">
+            <p key={p} data-para className="mb-4 text-[0.9rem] leading-[1.95] text-muted last:mb-0">
               {p}
             </p>
           ))}
           {essay.date ? <div className="mono-label mt-5">{essay.date}</div> : null}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+/* ------------------------------------------------------------ 单首诗 */
+function PoemItem({
+  p,
+  no,
+  isOpen,
+  showTrans,
+  showNotes,
+  onToggle,
+  onTogglePanel,
+}: {
+  p: Poem;
+  no: number;
+  isOpen: boolean;
+  showTrans: boolean;
+  showNotes: boolean;
+  onToggle: () => void;
+  onTogglePanel: (kind: string) => void;
+}) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const hasTrans = Array.isArray(p.trans)
+    ? p.trans.length > 0
+    : typeof p.trans === 'string' && p.trans.length > 0;
+  const transList = Array.isArray(p.trans) ? p.trans : p.trans ? [p.trans] : [];
+  const sign = signOf(p);
+
+  /* 展开：正文逐行落字。只动 transform/opacity，且只在这一首上跑一次。
+     正文不做逐字动画——那是装饰，会干扰读诗。 */
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || !isOpen || !canAnimateDecor()) return;
+    const tl = gsap.timeline();
+    tl.fromTo(
+      el.querySelectorAll('[data-line]'),
+      { y: 14, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.5, stagger: 0.045, ease: 'power2.out' },
+    ).fromTo(
+      el.querySelectorAll('[data-tail]'),
+      { x: -8, opacity: 0 },
+      { x: 0, opacity: 1, duration: 0.45, stagger: 0.08, ease: 'power2.out' },
+      '-=0.2',
+    );
+    return () => {
+      tl.kill();
+    };
+  }, [isOpen, showTrans, showNotes]);
+
+  return (
+    <li
+      data-poem={p.t}
+      data-open={isOpen ? 'true' : 'false'}
+      className={`poem-item scroll-mt-24 border-b ${
+        isOpen ? 'border-accent-deep/35 bg-[#0b0b10]' : 'border-line-soft'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        className="poem-head group flex w-full items-start justify-between gap-5 py-4 text-left"
+      >
+        <span className="flex min-w-0 flex-1 items-start gap-4">
+          <span className="poem-no pt-[0.45em]">{String(no).padStart(2, '0')}</span>
+          <span className={`poem-title ${isOpen ? 'is-open' : ''}`}>{p.t}</span>
+        </span>
+
+        <span className="flex shrink-0 items-center gap-2 pt-[0.55em]">
+          {/* 折叠态不放"译文/注释"文字：25 首全挂一遍会变成噪音，
+              这些内容展开后自然就在那里，用符号提示足够 */}
+          {hasTrans || p.notes ? (
+            <span
+              className="hidden text-[0.6rem] tracking-[0.2em] text-line transition-colors duration-300 group-hover:text-faint sm:inline"
+              aria-hidden="true"
+            >
+              {hasTrans ? '译' : ''}
+              {hasTrans && p.notes ? '·' : ''}
+              {p.notes ? '注' : ''}
+            </span>
+          ) : null}
+          <CaretDown
+            size={14}
+            className={`text-faint transition-all duration-300 group-hover:text-accent ${
+              isOpen ? 'rotate-180 text-accent' : ''
+            }`}
+          />
+        </span>
+      </button>
+
+      {isOpen ? (
+        <div ref={bodyRef} className="pb-9 pl-[2.6rem] pr-1">
+          <div className="min-w-0">
+            {p.note ? (
+              <div data-tail className="mb-6 max-w-[34ch]">
+                <span className="mono-label">题解</span>
+                <p className="mt-2 text-[0.82rem] leading-[1.9] text-faint">{p.note}</p>
+              </div>
+            ) : null}
+
+            <div className="verse measure text-[1.08rem] text-text/92">
+              {p.body.map((line, i) => (
+                <span key={`${line}-${i}`} data-line className="poem-line">
+                  {line}
+                </span>
+              ))}
+            </div>
+
+            {/* 落款 + 印章 */}
+            <div data-tail className="mt-6 flex items-center gap-3">
+              <span className="poem-sign">{sign ? `末句 · ${sign}` : '陆思鼎'}</span>
+              <span className="seal" aria-hidden="true">
+                鼎
+              </span>
+            </div>
+
+            {hasTrans || p.notes ? (
+              <div data-tail className="mt-7 flex gap-2">
+                {hasTrans ? (
+                  <button
+                    type="button"
+                    onClick={() => onTogglePanel('trans')}
+                    aria-expanded={showTrans}
+                    className={`rounded-[var(--radius-tile)] border px-3 py-1.5 text-[0.78rem] transition-colors duration-200 ${
+                      showTrans
+                        ? 'border-accent text-accent'
+                        : 'border-line text-muted hover:border-accent/50 hover:text-accent'
+                    }`}
+                  >
+                    译文
+                  </button>
+                ) : null}
+                {p.notes ? (
+                  <button
+                    type="button"
+                    onClick={() => onTogglePanel('notes')}
+                    aria-expanded={showNotes}
+                    className={`rounded-[var(--radius-tile)] border px-3 py-1.5 text-[0.78rem] transition-colors duration-200 ${
+                      showNotes
+                        ? 'border-accent text-accent'
+                        : 'border-line text-muted hover:border-accent/50 hover:text-accent'
+                    }`}
+                  >
+                    注释
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {showTrans && transList.length ? (
+              <div data-tail className="measure mt-5 border-l border-accent/40 pl-5">
+                {transList.map((seg, i) => (
+                  <p
+                    key={`${seg}-${i}`}
+                    className="mb-3 text-[0.86rem] leading-[1.95] text-muted last:mb-0"
+                  >
+                    {seg}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+
+            {showNotes && p.notes ? (
+              <div data-tail className="measure mt-5 border-l border-accent/40 pl-5">
+                <p className="text-[0.86rem] leading-[1.95] text-muted">{p.notes}</p>
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </li>
@@ -114,6 +304,7 @@ export default function Poetry() {
   const [activeYear, setActiveYear] = useState<string | null>(null);
   const [params] = useSearchParams();
   const listRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
 
   const b = BOOKS[book];
   const total = useMemo(
@@ -121,13 +312,23 @@ export default function Poetry() {
     [],
   );
 
-  /* 已展开几首：给读者一个"我读到哪了"的微弱进度感，不做存档、不做强制 */
   const openedCount = useMemo(
     () => b.groups.reduce((n, g) => n + g.poems.filter((p) => open[poemKey(book, p.t)]).length, 0),
     [b, book, open],
   );
 
-  /* ?poem=诗名 深链：自动选中诗集并展开该首 */
+  /* 换诗集时：目录整体重排，给一次轻微的落字感（不是逐条淡入那么碎） */
+  useEffect(() => {
+    const el = pageRef.current;
+    if (!el || !canAnimateDecor()) return;
+    gsap.fromTo(
+      el.querySelectorAll('[data-volume]'),
+      { y: 16, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.55, stagger: 0.07, ease: 'power2.out' },
+    );
+  }, [book]);
+
+  /* ?poem=诗名 深链 */
   useEffect(() => {
     const target = params.get('poem');
     if (!target) return;
@@ -152,8 +353,7 @@ export default function Poetry() {
     if (hit) setBook(hit);
   }, [params]);
 
-  /* 卷次吸附：滚动时标出当前读到哪一年。用 IntersectionObserver，
-     不监听 window scroll（页面本身不能逐帧算）。 */
+  /* 卷次吸附：标出当前读到哪一年 */
   useEffect(() => {
     const root = listRef.current;
     if (!root) return;
@@ -164,7 +364,7 @@ export default function Poetry() {
       (entries) => {
         const hit = entries
           .filter((e) => e.isIntersecting)
-          .sort((a, b2) => b2.intersectionRatio - a.intersectionRatio)[0];
+          .sort((x, y) => y.intersectionRatio - x.intersectionRatio)[0];
         if (hit) setActiveYear(hit.target.getAttribute('data-year'));
       },
       { rootMargin: '-20% 0px -70% 0px', threshold: [0, 1] },
@@ -194,257 +394,192 @@ export default function Poetry() {
       title="诗歌"
       meta={`《春潋集》${countPoems(BOOKS.chunlian)} 首 · 《行吟集》${countPoems(BOOKS.xingyin)} 首 · 合计 ${total} 首 · 含序、跋与白话译文`}
     >
-      {/* ======================= 扉页 ======================= */}
-      <section className="relative border-t border-line pt-14 md:pt-20">
-        <div className="flex items-start justify-between gap-8">
-          <div className="min-w-0">
-            <div className="mono-label">诗集</div>
-            <h2 className="display-serif-cn mt-4 text-[clamp(1.9rem,5vw,3rem)]">
-              《{b.name}》
-            </h2>
-            <p className="verse mt-5 text-[1.05rem] text-muted">
-              陆思鼎
-              <span className="mx-3 text-line">|</span>
-              {years.length ? `${years[0]}–${years[years.length - 1]}` : ''}
-              <span className="mx-3 text-line">|</span>
-              {countPoems(b)} 首
-            </p>
+      {/* 纸张层：噪声 + 界格 + 氛围光。整页共用一层，不再各页各写一套 */}
+      <div className="paper ruled relative">
+        <div aria-hidden="true" className="aura" />
 
-            {b.intro ? (
-              <ul className="mt-8 max-w-[34rem]">
-                <EssayBlock
-                  essay={b.intro}
-                  open={!!open[poemKey(book, b.intro.title)]}
-                  onToggle={() =>
-                    setOpen((m) => ({
-                      ...m,
-                      [poemKey(book, b.intro!.title)]: !m[poemKey(book, b.intro!.title)],
-                    }))
-                  }
-                />
-              </ul>
-            ) : null}
-          </div>
+        <div ref={pageRef}>
+          {/* ======================= 扉页 ======================= */}
+          <section className="relative pt-14 md:pt-16">
+            <div className="flex items-start justify-between gap-10">
+              <div className="min-w-0">
+                <div className="mono-label">诗集</div>
 
-          {/* 竖排书名：全站唯一使用竖排的地方。
-              只放 2–5 字，避免长竖排在字体差异下失控。 */}
-          <div
-            aria-hidden="true"
-            className="vertical-cn hidden shrink-0 select-none text-[clamp(1.6rem,3.4vw,2.4rem)] leading-none text-accent-deep/70 md:block"
-          >
-            {b.name}
-          </div>
-        </div>
-      </section>
+                {/* 大字拉引：把集名当作一句"话"来排，而不是当作小标题 */}
+                <h2 className="display-serif-cn mt-5 text-[clamp(2.1rem,5.6vw,3.6rem)] leading-[1.1]">
+                  《{b.name}》
+                </h2>
 
-      {/* ======================= 选集 + 目录 ======================= */}
-      <div className="mt-20 grid gap-14 lg:grid-cols-12 lg:gap-16">
-        {/* 左：选集、卷次刻度、佳句 */}
-        <aside className="lg:col-span-4">
-          <div className="lg:sticky lg:top-28">
-            <div className="flex flex-col gap-3">
-              {BOOK_KEYS.map((k) => {
-                const active = k === book;
-                return (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setBook(k)}
-                    aria-pressed={active}
-                    className={`flex items-baseline justify-between border px-4 py-3.5 text-left transition-colors duration-200 ${
-                      active
-                        ? 'border-accent bg-ink text-accent'
-                        : 'border-line text-text hover:border-accent/50 hover:text-accent'
-                    }`}
-                  >
-                    <span className="verse text-[1.05rem]">《{BOOKS[k].name}》</span>
-                    <span className="mono-label">{countPoems(BOOKS[k])} 首</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* 卷次刻度：当前读到哪一年，一眼能看见 */}
-            {years.length ? (
-              <div className="mt-10 border-t border-line pt-6">
-                <div className="flex items-baseline justify-between">
-                  <span className="mono-label">卷次</span>
-                  <span className="mono-label">
-                    已展开 {openedCount} / {countPoems(b)}
+                <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-3">
+                  <span className="verse text-[1.05rem] text-muted">陆思鼎</span>
+                  <span className="seal" aria-hidden="true">
+                    鼎
                   </span>
+                  {years.length ? (
+                    <span className="display-latin text-[1.15rem] text-accent-deep">
+                      {years[0]}–{years[years.length - 1]}
+                    </span>
+                  ) : null}
+                  <span className="mono-label">{countPoems(b)} 首</span>
                 </div>
-                <ul className="mt-4 flex flex-col gap-1">
-                  {years.map((y) => {
-                    const on = activeYear === y;
-                    const n = b.groups.find((g) => g.year === y)?.poems.length ?? 0;
+
+                {b.intro ? (
+                  <ul className="mt-10 max-w-[34rem] border-t border-line pt-1">
+                    <EssayBlock
+                      essay={b.intro}
+                      open={!!open[poemKey(book, b.intro.title)]}
+                      onToggle={() =>
+                        setOpen((m) => ({
+                          ...m,
+                          [poemKey(book, b.intro!.title)]: !m[poemKey(book, b.intro!.title)],
+                        }))
+                      }
+                    />
+                  </ul>
+                ) : null}
+              </div>
+
+              {/* 竖排发光书名：全站唯一使用竖排的地方，只放 2–5 字 */}
+              <div
+                aria-hidden="true"
+                className="vertical-cn vertical-glow hidden shrink-0 select-none text-[clamp(1.7rem,3.6vw,2.6rem)] leading-none text-accent/80 md:block"
+              >
+                {b.name}
+              </div>
+            </div>
+          </section>
+
+          {/* ======================= 选集 + 目录 ======================= */}
+          <div className="mt-20 grid gap-14 lg:grid-cols-12 lg:gap-16">
+            {/* 左：选集、卷次刻度、佳句 */}
+            <aside className="lg:col-span-4">
+              <div className="lg:sticky lg:top-28">
+                <div className="flex flex-col gap-3">
+                  {BOOK_KEYS.map((k) => {
+                    const active = k === book;
                     return (
-                      <li key={y}>
-                        <button
-                          type="button"
-                          onClick={() => jumpToYear(y)}
-                          className={`flex w-full items-center gap-3 py-1.5 text-left transition-colors duration-200 ${
-                            on ? 'text-accent' : 'text-faint hover:text-muted'
-                          }`}
-                        >
-                          <span
-                            aria-hidden="true"
-                            className={`h-px transition-all duration-300 ${
-                              on ? 'w-6 bg-accent' : 'w-3 bg-line'
-                            }`}
-                          />
-                          <span className="num text-[0.78rem]">{y}</span>
-                          <span className="num ml-auto text-[0.72rem]">{n} 首</span>
-                        </button>
-                      </li>
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setBook(k)}
+                        aria-pressed={active}
+                        className={`flex items-baseline justify-between border px-4 py-3.5 text-left transition-colors duration-200 ${
+                          active
+                            ? 'border-accent bg-ink text-accent'
+                            : 'border-line text-text hover:border-accent/50 hover:text-accent'
+                        }`}
+                      >
+                        <span className="verse text-[1.05rem]">《{BOOKS[k].name}》</span>
+                        <span className="mono-label">{countPoems(BOOKS[k])} 首</span>
+                      </button>
                     );
                   })}
-                </ul>
-              </div>
-            ) : null}
+                </div>
 
-            <div className="mt-10 border-t border-line pt-6">
-              <span className="mono-label">佳句</span>
-              <QuoteStrip />
-            </div>
-          </div>
-        </aside>
-
-        {/* 右：卷次与正文 */}
-        <div className="lg:col-span-8" ref={listRef}>
-          <div className="flex items-baseline justify-between border-b border-line pb-4">
-            <h2 className="verse text-xl">《{b.name}》目录</h2>
-            <span className="mono-label">{countPoems(b)} 首</span>
-          </div>
-
-          <ul className="mt-8 flex flex-col gap-10">
-            {b.groups.map((g) => (
-              <li key={g.year ?? 'ungrouped'}>
-                {g.year ? (
-                  /* 卷首：年份从灰色小字升级为卷次分隔 */
-                  <div data-year={g.year} className="volume-rule scroll-mt-24 pb-1">
-                    <span>{g.year}</span>
-                    <span className="text-faint">{g.poems.length} 首</span>
+                {years.length ? (
+                  <div className="mt-10 border-t border-line pt-6">
+                    <div className="flex items-baseline justify-between">
+                      <span className="mono-label">卷次</span>
+                      <span className="mono-label">
+                        已展开 {openedCount} / {countPoems(b)}
+                      </span>
+                    </div>
+                    <ul className="mt-4 flex flex-col gap-1">
+                      {years.map((y) => {
+                        const on = activeYear === y;
+                        const n = b.groups.find((g) => g.year === y)?.poems.length ?? 0;
+                        return (
+                          <li key={y}>
+                            <button
+                              type="button"
+                              onClick={() => jumpToYear(y)}
+                              className={`flex w-full items-center gap-3 py-1.5 text-left transition-colors duration-200 ${
+                                on ? 'text-accent' : 'text-faint hover:text-muted'
+                              }`}
+                            >
+                              <span
+                                aria-hidden="true"
+                                className={`h-px transition-all duration-300 ${
+                                  on ? 'w-6 bg-accent' : 'w-3 bg-line'
+                                }`}
+                              />
+                              <span className="num text-[0.78rem]">{y}</span>
+                              <span className="num ml-auto text-[0.72rem]">{n} 首</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </div>
                 ) : null}
 
-                <ul className="mt-2">
-                  {g.poems.map((p) => {
-                    const isOpen = !!open[poemKey(book, p.t)];
-                    const hasTrans = Array.isArray(p.trans)
-                      ? p.trans.length > 0
-                      : typeof p.trans === 'string' && p.trans.length > 0;
-                    const showTrans = !!panels[panelKey(book, p.t, 'trans')];
-                    const showNotes = !!panels[panelKey(book, p.t, 'notes')];
-                    const transList = Array.isArray(p.trans) ? p.trans : p.trans ? [p.trans] : [];
+                <div className="mt-10 border-t border-line pt-6">
+                  <span className="mono-label">佳句</span>
+                  <QuoteStrip />
+                </div>
+              </div>
+            </aside>
 
-                    return (
-                      <li key={p.t} data-poem={p.t} className="scroll-mt-24 border-b border-line-soft">
-                        <button
-                          type="button"
-                          onClick={() => togglePoem(p.t)}
-                          aria-expanded={isOpen}
-                          className="group flex w-full items-center justify-between gap-4 py-4 text-left"
-                        >
-                          <span className="verse text-[1.05rem] transition-colors duration-200 group-hover:text-accent">
-                            {p.t}
-                          </span>
-                          <CaretDown
-                            size={14}
-                            className={`shrink-0 text-faint transition-transform duration-300 group-hover:text-accent ${
-                              isOpen ? 'rotate-180' : ''
-                            }`}
+            {/* 右：卷次与正文 */}
+            <div className="lg:col-span-8" ref={listRef}>
+              <div className="flex items-baseline justify-between border-b border-line pb-4">
+                <h2 className="verse text-xl">《{b.name}》目录</h2>
+                <span className="mono-label">{countPoems(b)} 首</span>
+              </div>
+
+              <ul className="mt-10 flex flex-col gap-12">
+                {b.groups.map((g) => {
+                  let running = 0;
+                  /* 全局序号：跨卷连续，诗集的条目本来就该连续编号 */
+                  for (const gg of b.groups) {
+                    if (gg === g) break;
+                    running += gg.poems.length;
+                  }
+
+                  return (
+                    <li key={g.year ?? 'ungrouped'} data-volume>
+                      {g.year ? (
+                        <div data-year={g.year} className="volume-rule scroll-mt-24">
+                          <span className="volume-year">{g.year}</span>
+                          <span className="volume-count">{g.poems.length} 首</span>
+                        </div>
+                      ) : null}
+
+                      <ul className="mt-1">
+                        {g.poems.map((p, i) => (
+                          <PoemItem
+                            key={p.t}
+                            p={p}
+                            no={running + i + 1}
+                            isOpen={!!open[poemKey(book, p.t)]}
+                            showTrans={!!panels[panelKey(book, p.t, 'trans')]}
+                            showNotes={!!panels[panelKey(book, p.t, 'notes')]}
+                            onToggle={() => togglePoem(p.t)}
+                            onTogglePanel={(kind) => togglePanel(p.t, kind)}
                           />
-                        </button>
+                        ))}
+                      </ul>
+                    </li>
+                  );
+                })}
+              </ul>
 
-                        {isOpen ? (
-                          <div className="measure pb-9">
-                            {p.note ? (
-                              <p className="mb-6 text-[0.82rem] leading-[1.9] text-faint">{p.note}</p>
-                            ) : null}
-
-                            <div className="verse text-[1.08rem] leading-[2.05] text-text/92">
-                              {p.body.map((line, i) => (
-                                <span key={`${line}-${i}`} className="block">
-                                  {line}
-                                </span>
-                              ))}
-                            </div>
-
-                            {hasTrans || p.notes ? (
-                              <div className="mt-7 flex gap-2">
-                                {hasTrans ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => togglePanel(p.t, 'trans')}
-                                    aria-expanded={showTrans}
-                                    className={`rounded-[var(--radius-tile)] border px-3 py-1.5 text-[0.78rem] transition-colors duration-200 ${
-                                      showTrans
-                                        ? 'border-accent text-accent'
-                                        : 'border-line text-muted hover:border-accent/50 hover:text-accent'
-                                    }`}
-                                  >
-                                    译文
-                                  </button>
-                                ) : null}
-                                {p.notes ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => togglePanel(p.t, 'notes')}
-                                    aria-expanded={showNotes}
-                                    className={`rounded-[var(--radius-tile)] border px-3 py-1.5 text-[0.78rem] transition-colors duration-200 ${
-                                      showNotes
-                                        ? 'border-accent text-accent'
-                                        : 'border-line text-muted hover:border-accent/50 hover:text-accent'
-                                    }`}
-                                  >
-                                    注释
-                                  </button>
-                                ) : null}
-                              </div>
-                            ) : null}
-
-                            {showTrans && transList.length ? (
-                              <div className="measure mt-5 border-l border-accent/40 pl-5">
-                                {transList.map((seg, i) => (
-                                  <p
-                                    key={`${seg}-${i}`}
-                                    className="mb-3 text-[0.86rem] leading-[1.95] text-muted last:mb-0"
-                                  >
-                                    {seg}
-                                  </p>
-                                ))}
-                              </div>
-                            ) : null}
-
-                            {showNotes && p.notes ? (
-                              <div className="measure mt-5 border-l border-accent/40 pl-5">
-                                <p className="text-[0.86rem] leading-[1.95] text-muted">{p.notes}</p>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </li>
-                    );
-                  })}
+              {b.outro ? (
+                <ul className="mt-14 border-t border-line pt-2">
+                  <EssayBlock
+                    essay={b.outro}
+                    open={!!open[poemKey(book, b.outro.title)]}
+                    onToggle={() =>
+                      setOpen((m) => ({
+                        ...m,
+                        [poemKey(book, b.outro!.title)]: !m[poemKey(book, b.outro!.title)],
+                      }))
+                    }
+                  />
                 </ul>
-              </li>
-            ))}
-          </ul>
-
-          {b.outro ? (
-            <ul className="mt-12 border-t border-line pt-2">
-              <EssayBlock
-                essay={b.outro}
-                open={!!open[poemKey(book, b.outro.title)]}
-                onToggle={() =>
-                  setOpen((m) => ({
-                    ...m,
-                    [poemKey(book, b.outro!.title)]: !m[poemKey(book, b.outro!.title)],
-                  }))
-                }
-              />
-            </ul>
-          ) : null}
+              ) : null}
+            </div>
+          </div>
         </div>
       </div>
     </DetailShell>

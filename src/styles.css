@@ -275,21 +275,32 @@
     color: var(--color-faint);
   }
 
-  /* 卷次分隔：诗集按年份分卷时的"卷首"横线 */
+  /* 卷次分隔：年份做成大号展示体——年份是书籍的骨节，不该缩成灰色小字 */
   .volume-rule {
     display: flex;
-    align-items: center;
-    gap: 0.9rem;
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.16em;
-    color: var(--color-muted);
+    align-items: baseline;
+    gap: 1.1rem;
+    padding-bottom: 0.5rem;
   }
   .volume-rule::after {
     content: "";
     flex: 1;
     height: 1px;
+    align-self: center;
     background: linear-gradient(to right, var(--color-line), transparent);
+  }
+  .volume-year {
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 3.6vw, 2.75rem);
+    line-height: 1;
+    color: #d8d8de;
+    letter-spacing: -0.01em;
+  }
+  .volume-count {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    color: var(--color-faint);
   }
 
   /* 竖排：只给"书名 / 卷名"这类 2–5 字的短元素用。
@@ -299,6 +310,151 @@
     text-orientation: upright;
     font-family: var(--font-verse);
     letter-spacing: 0.18em;
+  }
+  /* 竖排书名加一层极淡的发光，让它像"印在封面上的烫金"而不是一行字 */
+  .vertical-glow {
+    text-shadow:
+      0 0 26px color-mix(in oklab, var(--color-accent) 34%, transparent),
+      0 0 60px color-mix(in oklab, var(--color-accent) 14%, transparent);
+  }
+
+  /* ============================================== 诗集页：纸张与界格
+     黑底之所以"无趣"，是因为它只有一种黑、没有材质。
+     这里补三样：极淡的噪声（纸的颗粒）、竖排界格（古籍的乌丝栏）、
+     以及玫瑰与琥珀的极弱氛围光（暗部才有空气）。 */
+  .paper {
+    position: relative;
+  }
+  .paper::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    opacity: 0.035;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23p)'/%3E%3C/svg%3E");
+  }
+  /* 竖排界格：等距细竖线，像古籍的乌丝栏。
+     关键取舍：不做成"整页一块大图层"——那样它的遮罩会在内容上留下横线
+     （实测会横穿卷次年份与印章）。改成锚定视口的固定纹理，
+     只贡献竖线，且强度压到几乎只有侧视才能察觉。 */
+  .ruled::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    background-image: linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0.022) 1px,
+      transparent 1px
+    );
+    background-size: 4.5rem 100vh;
+    background-attachment: fixed;
+    background-repeat: repeat;
+  }
+  /* 氛围光：同样锚定视口，避免整页图层与内容叠出杂线 */
+  .aura {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: -2;
+    background:
+      radial-gradient(58% 42% at 84% 6%, rgba(224, 112, 143, 0.13), transparent 62%),
+      radial-gradient(52% 40% at 8% 74%, rgba(224, 167, 88, 0.075), transparent 64%),
+      radial-gradient(64% 46% at 52% 108%, rgba(154, 131, 216, 0.085), transparent 66%);
+    background-attachment: fixed;
+  }
+
+  /* ============================================== 诗条：折叠小字 / 展开大字 */
+  .poem-head {
+    cursor: pointer;
+  }
+  .poem-no {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    color: var(--color-faint);
+    transition: color 300ms ease;
+  }
+  .poem-title {
+    font-family: var(--font-verse);
+    font-size: 1.02rem;
+    font-weight: 500;
+    line-height: 1.5;
+    color: #c9c9d0;
+    transition: color 320ms ease;
+    text-wrap: balance;
+  }
+  .poem-head:hover .poem-title { color: var(--color-accent); }
+  .poem-head:hover .poem-no { color: var(--color-accent); }
+
+  /* 展开后标题变大字：这是整页最明显的排版事件 */
+  .poem-title.is-open {
+    font-size: clamp(1.55rem, 3.6vw, 2.5rem);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--color-text);
+    line-height: 1.2;
+  }
+  /* 展开后的卡片：左侧一根强调竖线 + 一次柔和的外发光。
+     这是"展开"这个动作在视觉上的回报，也是全页唯一发光的地方。 */
+  .poem-item {
+    position: relative;
+    transition: border-color 500ms ease, background-color 500ms ease, box-shadow 600ms ease;
+  }
+  .poem-item[data-open='true'] {
+    box-shadow: inset 0 0 60px color-mix(in oklab, var(--color-accent) 5%, transparent);
+  }
+  .poem-item[data-open='true']::before {
+    content: "";
+    position: absolute;
+    left: -1px;
+    top: 0.9rem;
+    bottom: 0.9rem;
+    width: 2px;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-accent) 80%, transparent),
+      color-mix(in oklab, var(--color-amber) 42%, transparent) 60%,
+      transparent
+    );
+  }
+  /* 展开后的引号装饰：长文标题旁的一个"开引号"，撑开版面的同时不抢字 */
+  .poem-open-mark {
+    font-family: var(--font-display);
+    font-size: clamp(2.6rem, 6vw, 4.5rem);
+    line-height: 0.6;
+    color: color-mix(in oklab, var(--color-accent) 40%, transparent);
+    user-select: none;
+  }
+  /* 落款 + 印章：两句宋词下面该有的东西 */
+  .poem-sign {
+    font-family: var(--font-verse);
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+    color: var(--color-faint);
+  }
+  .seal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.55rem;
+    height: 1.55rem;
+    flex: none;
+    border: 1px solid color-mix(in oklab, var(--color-amber) 62%, transparent);
+    color: color-mix(in oklab, var(--color-amber) 88%, transparent);
+    font-family: var(--font-verse);
+    font-size: 0.78rem;
+    line-height: 1;
+    background: color-mix(in oklab, var(--color-amber) 9%, transparent);
+  }
+
+  /* 正文行：入场动画的落点，也是排版的基准 */
+  .poem-line {
+    display: block;
+    line-height: 2.05;
   }
 }
 
