@@ -44,10 +44,16 @@ function countPoems(b: Book) {
   return b.groups.reduce((sum, g) => sum + g.poems.length, 0);
 }
 
-/* 落款：从正文里取末句的头几个字，像手稿末尾的题识 */
-function signOf(p: Poem) {
-  const last = p.body[p.body.length - 1] ?? '';
-  return last.replace(/[，。、；？！,.]/g, ' ').trim().split(/\s+/)[0]?.slice(0, 4) ?? '';
+/* 署名：落款只写作者，不重复正文。
+   （之前这里取正文末行头四字拼成"末句 · X"，既不是落款用语，
+   又等于把正文重复了一遍，每首都有还等于没有信息。） */
+const AUTHOR = '陆思鼎';
+
+/* 日期串形如「陆思鼎 · 2025 年 6 月 12 日」，拆出人、日期与干支式年份 */
+function splitDate(date?: string) {
+  if (!date) return { who: AUTHOR, when: '' };
+  const parts = date.split('·').map((s) => s.trim());
+  return { who: parts[0] || AUTHOR, when: parts.slice(1).join(' · ') };
 }
 
 /* ------------------------------------------------------------- 佳句轮播 */
@@ -84,18 +90,42 @@ function QuoteStrip() {
   );
 }
 
-/* --------------------------------------------------------------- 序 / 跋 */
-function EssayBlock({ essay, open, onToggle }: { essay: Essay; open: boolean; onToggle: () => void }) {
+/* --------------------------------------------------------------- 序 / 跋
+   序与跋是"书"的一部分，不该和一首诗长得一样。
+   给它们独立的版式：序号标、宋体标题、更宽的正文栏（散文行宽 46ch）、
+   段首字略大（中文书籍常见的首字强调），以及署名 + 印章收尾。 */
+function EssayBlock({
+  essay,
+  index,
+  open,
+  onToggle,
+}: {
+  essay: Essay;
+  /** 部次标号，序号由渲染方给（序=序、跋=跋） */
+  index: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const { who, when } = splitDate(essay.date);
 
   useEffect(() => {
     const el = bodyRef.current;
     if (!el || !open || !canAnimateDecor()) return;
-    gsap.fromTo(
+    const tl = gsap.timeline();
+    tl.fromTo(
       el.querySelectorAll('[data-para]'),
-      { y: 10, opacity: 0 },
-      { y: 0, opacity: 1, duration: 0.5, stagger: 0.07, ease: 'power2.out' },
+      { y: 12, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.5, stagger: 0.08, ease: 'power2.out' },
+    ).fromTo(
+      el.querySelectorAll('[data-sign]'),
+      { x: -8, opacity: 0 },
+      { x: 0, opacity: 1, duration: 0.45, ease: 'power2.out' },
+      '-=0.2',
     );
+    return () => {
+      tl.kill();
+    };
   }, [open]);
 
   return (
@@ -104,21 +134,42 @@ function EssayBlock({ essay, open, onToggle }: { essay: Essay; open: boolean; on
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="group flex w-full items-center justify-between gap-4 py-4 text-left"
+        className="group flex w-full items-baseline justify-between gap-5 py-5 text-left"
       >
-        <span className="verse text-[1rem] transition-colors duration-200 group-hover:text-accent">
-          {essay.title}
+        <span className="flex min-w-0 items-baseline gap-4">
+          <span className="poem-no">{index}</span>
+          <span className="display-serif-cn text-[1.35rem] text-text transition-colors duration-300 group-hover:text-accent md:text-[1.6rem]">
+            {essay.title}
+          </span>
+          {when ? <span className="mono-label hidden sm:inline">{when}</span> : null}
         </span>
-        <span className="mono-label">{open ? '收起' : '展开'}</span>
+        <span className="mono-label shrink-0 transition-colors duration-300 group-hover:text-accent">
+          {open ? '收起' : '展开'}
+        </span>
       </button>
+
       {open ? (
-        <div ref={bodyRef} className="measure pb-8">
-          {essay.paras.map((p) => (
-            <p key={p} data-para className="mb-4 text-[0.9rem] leading-[1.95] text-muted last:mb-0">
-              {p}
-            </p>
-          ))}
-          {essay.date ? <div className="mono-label mt-5">{essay.date}</div> : null}
+        <div ref={bodyRef} className="pb-10">
+          <div className="measure-wide prose-cjk">
+            {essay.paras.map((p, i) => (
+              <p
+                key={p}
+                data-para
+                className={`text-[0.94rem] leading-[2.05] text-muted ${
+                  i === 0 ? 'first-letter:mr-1 first-letter:float-left first-letter:font-serif first-letter:text-[1.9rem] first-letter:leading-[1.35] first-letter:text-accent-deep' : ''
+                }`}
+              >
+                {p}
+              </p>
+            ))}
+          </div>
+
+          <div data-sign className="mt-8 flex items-center gap-3">
+            <span className="poem-sign">{who}</span>
+            <span className="seal" aria-hidden="true">
+              鼎
+            </span>
+          </div>
         </div>
       ) : null}
     </li>
@@ -149,7 +200,6 @@ function PoemItem({
     ? p.trans.length > 0
     : typeof p.trans === 'string' && p.trans.length > 0;
   const transList = Array.isArray(p.trans) ? p.trans : p.trans ? [p.trans] : [];
-  const sign = signOf(p);
 
   /* 展开：标题"涨大" + 正文逐行落字。
      标题的字号切换不能直接动画（font-size 不可动画，会逐帧重排），
@@ -274,9 +324,9 @@ function PoemItem({
               ))}
             </div>
 
-            {/* 落款 + 印章 */}
+            {/* 落款：只写作者 + 印章。落款是署名，不是正文的副本。 */}
             <div data-tail className="mt-6 flex items-center gap-3">
-              <span className="poem-sign">{sign ? `末句 · ${sign}` : '陆思鼎'}</span>
+              <span className="poem-sign">{AUTHOR}</span>
               <span className="seal" aria-hidden="true">
                 鼎
               </span>
@@ -476,9 +526,10 @@ export default function Poetry() {
                 </div>
 
                 {b.intro ? (
-                  <ul className="mt-10 max-w-[34rem] border-t border-line pt-1">
+                  <ul className="mt-10 border-t border-line pt-1">
                     <EssayBlock
                       essay={b.intro}
+                      index="序"
                       open={!!open[poemKey(book, b.intro.title)]}
                       onToggle={() =>
                         setOpen((m) => ({
@@ -639,18 +690,25 @@ export default function Poetry() {
                   })}
 
                   {b.outro ? (
-                    <ul className="mt-14 border-t border-line pt-2">
-                      <EssayBlock
-                        essay={b.outro}
-                        open={!!open[poemKey(book, b.outro.title)]}
-                        onToggle={() =>
-                          setOpen((m) => ({
-                            ...m,
-                            [poemKey(book, b.outro!.title)]: !m[poemKey(book, b.outro!.title)],
-                          }))
-                        }
-                      />
-                    </ul>
+                    /* 跋单独成块：它是全书的收尾，不该紧贴着最后一首诗 */
+                    <div className="mt-16">
+                      <div className="volume-head mb-4">
+                        <span className="mono-label">卷末</span>
+                      </div>
+                      <ul className="border-t border-line">
+                        <EssayBlock
+                          essay={b.outro}
+                          index="跋"
+                          open={!!open[poemKey(book, b.outro.title)]}
+                          onToggle={() =>
+                            setOpen((m) => ({
+                              ...m,
+                              [poemKey(book, b.outro!.title)]: !m[poemKey(book, b.outro!.title)],
+                            }))
+                          }
+                        />
+                      </ul>
+                    </div>
                   ) : null}
                 </div>
               </div>

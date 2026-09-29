@@ -54,6 +54,10 @@ const EXPR = `(() => {
     canvasPainted,
     years: [...document.querySelectorAll('[data-year]')].map((e) => e.getAttribute('data-year')),
     volumeRules: document.querySelectorAll('.volume-head').length,
+    /* 序 / 跋：数据里有就必须渲染出来，且带部次标号 */
+    essayTitles: [...document.querySelectorAll('.display-serif-cn')]
+      .map((e) => e.textContent.trim())
+      .filter((t) => /序|跋/.test(t) && t.length <= 8),
     /* 边栏序号系统：连续编号列 + 每年一个卷首 + 每首一个刻度 */
     indexRail: !!document.querySelector('.index-rail'),
     indexTicks: document.querySelectorAll('.index-tick').length,
@@ -129,7 +133,18 @@ try {
     check(`[${vp.name}] 诗歌页无横向溢出`, d.scrollW <= d.clientW + 1, `${d.scrollW}/${d.clientW}`);
     /* 竖排是刻意只在桌面出现的：竖排在窄屏会把 2–5 字压得过小，反而更差 */
     check(`[${vp.name}] 诗歌页扉页竖排书名`, vp.w < 700 ? d.verticalCn === 0 : d.verticalCn >= 1, `vertical=${d.verticalCn}`);
-    check(`[${vp.name}] 卷次分隔齐全（2022–2025）`, d.years.length === 4 && d.volumeRules === 4, `years=${d.years.join(',')} rules=${d.volumeRules}`);
+    /* 卷次头至少有 4 个（2022–2025）；卷末那块也用同一个类，所以不写死等于 4 */
+    check(
+      `[${vp.name}] 卷次分隔齐全（2022–2025）`,
+      d.years.length === 4 && d.volumeRules >= 4,
+      `years=${d.years.join(',')} 卷次头=${d.volumeRules}`,
+    );
+    /* 春潋集有 1 序 1 跋，都必须渲染出来（曾出现"序不见了"的误判） */
+    check(
+      `[${vp.name}] 序与跋都渲染`,
+      d.essayTitles.length >= 2,
+      d.essayTitles.join(' / ') || '(无)',
+    );
     check(
       `[${vp.name}] 边栏序号系统（连续编号列 + 刻度）`,
       d.indexRail && d.indexTicks === 25,
