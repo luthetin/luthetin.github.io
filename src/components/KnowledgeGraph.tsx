@@ -87,17 +87,39 @@ const PHYS = {
   ALPHA_DECAY: 0.997,
   ALPHA_MIN: 0.004,
 };
-/** 每次拖拽的"重新收敛"强度。
-    桌面版拖拽用的是 0.5，但在桌面版里那是"整图重新布局"的强度：
-    实测它会把其它节点的中位位移推到 176，在本站视觉上就是"整图炸开"。
-    实测扫描（拖 300）：
-      0.5  → 中位 176 / p90 467 / 最大 625
-      0.08 → 中位  91 / p90 254 / 最大 481
-      0.03 → 中位  49 / p90  84 / 最大 149   ← 采用
-    0.03 配合 2 步/帧，呈"邻近节点被明显带动、远处基本不动"的局部收敛。 */
+/** 每次拖拽"抖一下"的初始强度 */
 const DRAG_ALPHA_START = 0.03;
-/** 每帧跑几步（配合 0.03 用 2 步） */
+/** 拖动中每步的强度衰减（鼠标还在移动时用这个：保持灵敏响应） */
+const DRAG_ALPHA_DECAY_HOLD = 0.97;
+/** 鼠标停下后的衰减（更快安静下来）—— 用户"按着不动"时不该看到节点还在漂 */
+const DRAG_ALPHA_DECAY_STILL = 0.94;
+/** 判定"鼠标停下"的阈值（毫秒） */
+const STILL_MS = 220;
+/** 松手后每帧把强度衰减掉的比例（更快归零） */
+const DRAG_ALPHA_FADE = 0.92;
+/** 归位弹簧强度：把每个节点拉回它"离线算好的位置"。
+    这是"不该一直动"的正解 —— 光靠衰减只是让力变小，系统仍会停在一个
+    被拖出来的新平衡点上（实测整体偏了 45 个单位）。有了它，强度归零后
+    布局会真正回到原始状态，也让交互有弹性回位的手感。 */
+const HOME_PULL = 0.085;
+/** 每帧跑几步 */
 const STEPS_PER_FRAME = 2;
+/** 归零后还要跑到完全静止才停循环 —— 避免"停在半路"（停在物理中途更难看） */
+const IDLE_STEPS = 8;
+/** 松手后的收尾步数（一次性算完，不逐帧） */
+const SETTLE_STEPS = 24;
+
+/* ----------------------------------------------------------------------------
+   物理的边界必须与离线收敛时用的一致
+
+   离线布局是在 LAYOUT 这个范围内收敛的（节点归一化到 MARGIN=40、跨度 920）。
+   而我一开始把团心吸引的边界写成了加了 90 余量的 VIEW ——
+   范围不一致，系统就会去追另一个平衡点，实测整体漂移 32 个单位。
+   所以这里用"布局实际边界 + 4% 余量"，让导出的布局成为真正的不动点。
+   -------------------------------------------------------------------------- */
+const LB = { x: VIEW.x + 90, y: VIEW.y + 90, w: VIEW.w - 180, h: VIEW.h - 180 };
+const LCX = LB.x + LB.w / 2;
+const LCY = LB.y + LB.h / 2;
 
 /** 团心：用离线一并导出的那一份。
     不能用"当前布局的重心"临时算 —— 那份和离线收敛时的团心不一致，
@@ -158,6 +180,8 @@ export default function KnowledgeGraph({
     downX: number;
     downY: number;
   } | null>(null);
+  /** 指针最近一次移动的时间戳：用来判断"按着但没动" */
+  const lastMoveAtRef = useRef(0);
 
   /* 入场动画会把 stroke-dasharray 写成内联样式，动画结束后清掉。
      但 React 只在 style 对象变化时重设，清掉之后跨团虚线的 8 10 就回不来了。
@@ -176,12 +200,16 @@ export default function KnowledgeGraph({
   const physRef = useRef<PhysNode[]>(
     NODES.map((n) => ({ x: n.x, y: n.y, vx: 0, vy: 0, r: n.r, cat: n.cat })),
   );
+  /** 离线算好的"家"位置：归位弹簧的目标 */
+  const homeRef = useRef(NODES.map((n) => ({ x: n.x, y: n.y })));
   const alphaRef = useRef(DRAG_ALPHA_START);
   const rafRef = useRef<number | null>(null);
+  /** 松手后已经跑了几帧（用于判定"真的停了"） */
+  const idleStepsRef = useRef(0);
   const pinRef = useRef<{ i: number; x: number; y: number } | null>(null);
 
   /** 一步物理。照桌面版 tick() 的五段：互斥 / 弹簧 / 团心 / 积分 / 硬性防重叠 */
-  const tick = useCallback(() => {
+  const tick = useCallback((fade = true) => {
     const P = physRef.current;
     const n = P.length;
     let alpha = alphaRef.current;
@@ -224,8 +252,13 @@ export default function KnowledgeGraph({
       const c = CLUSTER_CENTER[p.cat];
       p.vx += (c.x - p.x) * PHYS.CLUSTER_PULL;
       p.vy += (c.y - p.y) * PHYS.CLUSTER_PULL;
-      p.vx += (VIEW.x + VIEW.w / 2 - p.x) * PHYS.CENTER_PULL;
-      p.vy += (VIEW.y + VIEW.h / 2 - p.y) * PHYS.CENTER_PULL;
+      /* 边界用布局实际范围（与离线一致），否则系统会追另一个平衡点而整体漂移 */
+      p.vx += (LCX - p.x) * PHYS.CENTER_PULL;
+      p.vy += (LCY - p.y) * PHYS.CENTER_PULL;
+      /* 归位：拉回离线位置。强度归零后布局会真正复原，不会停在被拖出的新平衡点 */
+      const home = homeRef.current[i];
+      p.vx += (home.x - p.x) * HOME_PULL;
+      p.vy += (home.y - p.y) * HOME_PULL;
       p.vx *= PHYS.DAMP; p.vy *= PHYS.DAMP;
       p.x += p.vx * alpha;
       p.y += p.vy * alpha;
@@ -244,7 +277,18 @@ export default function KnowledgeGraph({
         if (!bPinned) { b.x += ux * push; b.y += uy * push; }
       }
     }
-    alphaRef.current = Math.max(PHYS.ALPHA_MIN, alpha * PHYS.ALPHA_DECAY);
+    /* 强度衰减。三个分支都必须衰减 ——
+       之前拖动中把 alpha 钉成常数，力永不消失，于是"按着就一直动"。 */
+    if (fade) {
+      /* 松手后：快速归零 */
+      alphaRef.current = alpha * DRAG_ALPHA_FADE;
+    } else if (Date.now() - lastMoveAtRef.current > STILL_MS) {
+      /* 按着但鼠标没动：加速安静，别让用户看着节点一直漂 */
+      alphaRef.current = alpha * DRAG_ALPHA_DECAY_STILL;
+    } else {
+      /* 正在拖动：保持灵敏响应 */
+      alphaRef.current = alpha * DRAG_ALPHA_DECAY_HOLD;
+    }
   }, []);
 
   /** 把物理结果同步给渲染层 */
@@ -255,11 +299,18 @@ export default function KnowledgeGraph({
     setPos(next);
   }, []);
 
-  /** 每帧循环：只有"正在拖节点"时才跑物理，其余时间一帧不动（同桌面版） */
+  /** 每帧循环：拖动中一直跑；松手后跑到"真正静止"再停（不在半路刹住） */
   const loop = useCallback(() => {
-    if (pinRef.current) {
-      for (let k = 0; k < STEPS_PER_FRAME; k++) tick();
-      syncFromPhys();
+    const dragging = !!pinRef.current;
+    for (let k = 0; k < STEPS_PER_FRAME; k++) tick(!dragging);
+    syncFromPhys();
+    if (dragging) {
+      rafRef.current = requestAnimationFrame(loop);
+      return;
+    }
+    /* 松手后：衰减到极小时再补几步静止判定，避免"停在物理中途" */
+    idleStepsRef.current += 1;
+    if (idleStepsRef.current < IDLE_STEPS && alphaRef.current > 1e-5) {
       rafRef.current = requestAnimationFrame(loop);
     } else {
       rafRef.current = null;
@@ -267,6 +318,7 @@ export default function KnowledgeGraph({
   }, [tick, syncFromPhys]);
 
   const startLoop = useCallback(() => {
+    idleStepsRef.current = 0;
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(loop);
   }, [loop]);
 
@@ -334,9 +386,10 @@ export default function KnowledgeGraph({
       downY: e.clientY,
     };
     if (hit) {
-      /* 钉住被拖节点，并把收敛强度拉回 0.5 —— 桌面版拖拽时就是让它"在别处重新抖一下" */
+      /* 钉住被拖节点，并把收敛强度拉回起始值（相当于"在该处抖一下"） */
       pinRef.current = { i: NODES.findIndex((n) => n.id === hit.id), x: pos[hit.id].x, y: pos[hit.id].y };
       alphaRef.current = DRAG_ALPHA_START;
+      lastMoveAtRef.current = Date.now();
       startLoop();
     }
     try {
@@ -360,6 +413,10 @@ export default function KnowledgeGraph({
       d.moved = true;
       /* 只更新"钉子"的位置；其它节点的位移交给物理循环 */
       if (pinRef.current) { pinRef.current.x = p.x - d.tx; pinRef.current.y = p.y - d.ty; }
+      /* 记下"刚动过"，并补一点强度 —— 拖动期间要保持灵敏，
+         但鼠标一停就快速收敛（见 tick 里的 still 分支） */
+      lastMoveAtRef.current = Date.now();
+      alphaRef.current = Math.min(DRAG_ALPHA_START, alphaRef.current + 0.006);
       startLoop();
     } else {
       d.moved = true;
@@ -381,9 +438,11 @@ export default function KnowledgeGraph({
 
     if (d.part === 'node' && d.id) {
       if (isClick) onPick?.(picked === d.id ? null : (NODES.find((n) => n.id === d.id) ?? null));
-      /* 松手：解除钉子，再让物理收几步，把最后的位置坐实 */
-      for (let k = 0; k < 12; k++) tick();
+      /* 松手：解除钉子，然后让物理自己衰减到静止（跑满收尾步数）。
+         不在这里强行"刹住" —— 半路刹停看起来像卡顿。 */
       pinRef.current = null;
+      alphaRef.current = DRAG_ALPHA_START;
+      for (let k = 0; k < SETTLE_STEPS; k++) tick(true);
       syncFromPhys();
     } else if (d.part === 'pan' && isClick) {
       onPick?.(null); /* 点空白 → 关面板 */
