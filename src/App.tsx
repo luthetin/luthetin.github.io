@@ -11,6 +11,7 @@ import Nav from './components/Nav';
 import { LEGACY_REDIRECTS } from './data/site';
 import { MOTION, startPerfProbe } from './lib/motion';
 import Home from './pages/Home';
+import Knowledge from './pages/Knowledge';
 import NotFound from './pages/NotFound';
 import Poetry from './pages/Poetry';
 import WorkCode from './pages/WorkCode';
@@ -108,6 +109,7 @@ export default function App() {
           <Route path="/work/code" element={<WorkCode />} />
           <Route path="/work/media" element={<WorkMedia />} />
           <Route path="/work/poetry" element={<Poetry />} />
+          <Route path="/work/knowledge" element={<Knowledge />} />
           {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (
             <Route key={from} path={from} element={<Navigate to={to} replace />} />
           ))}
