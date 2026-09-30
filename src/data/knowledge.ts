@@ -29,7 +29,7 @@ export const KNOWLEDGE_META = {
   nodes: 52,
   links: 239,
   clusters: 10,
-  labelsShown: 51,
+  labelsShown: 52,
   topNode: '最优化理论',
   topDeg: 21,
 } as const;
@@ -77,13 +77,13 @@ export const CAT_META: Record<KnowledgeCat, { label: string; color: 'accent' | '
   }
 };
 
-export const NODES: KnowledgeNode[] = [{"id":"optimization","name":"最优化理论","cat":"opt","x":393.63,"y":376.19,"r":40.7,"deg":21,"labelDx":0,"labelDy":-55.2},
+export const NODES: KnowledgeNode[] = [{"id":"optimization","name":"最优化理论","cat":"opt","x":393.63,"y":376.19,"r":40.7,"deg":21,"labelDx":0,"labelDy":52.7},
   {"id":"linear-algebra","name":"高等代数／线性代数","cat":"math","x":393.1,"y":488.32,"r":31.22,"deg":18,"labelDx":0,"labelDy":43.22},
   {"id":"probability","name":"概率论","cat":"math","x":313.97,"y":457.8,"r":31.22,"deg":18,"labelDx":0,"labelDy":43.22},
   {"id":"information","name":"信息论","cat":"disc","x":65.4,"y":424.29,"r":28.32,"deg":17,"labelDx":0,"labelDy":40.32},
   {"id":"ml","name":"机器学习","cat":"comp","x":219.93,"y":565.72,"r":28.32,"deg":17,"labelDx":0,"labelDy":40.32},
-  {"id":"numerical","name":"数值分析","cat":"math","x":274.63,"y":392.64,"r":22.92,"deg":15,"labelDx":0,"labelDy":-37.42},
-  {"id":"real-func","name":"实变函数与泛函分析","cat":"math","x":448.44,"y":435.62,"r":22.92,"deg":15,"labelDx":0,"labelDy":0},
+  {"id":"numerical","name":"数值分析","cat":"math","x":274.63,"y":392.64,"r":22.92,"deg":15,"labelDx":0,"labelDy":34.92},
+  {"id":"real-func","name":"实变函数与泛函分析","cat":"math","x":448.44,"y":435.62,"r":22.92,"deg":15,"labelDx":0,"labelDy":34.92},
   {"id":"or","name":"运筹学与决策","cat":"econ","x":467.27,"y":558.62,"r":22.92,"deg":15,"labelDx":0,"labelDy":34.92},
   {"id":"statistics","name":"数理统计","cat":"math","x":341.29,"y":605.48,"r":15.85,"deg":12,"labelDx":0,"labelDy":27.85},
   {"id":"signal","name":"信号与图像处理","cat":"comp","x":129.99,"y":404.58,"r":15.85,"deg":12,"labelDx":0,"labelDy":27.85},

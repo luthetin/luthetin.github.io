@@ -1,29 +1,28 @@
 /* ============================================================================
    知识谱系 · 力导向关联图（React 版）
 
-   与桌面版《知识关系图.html》的关系：
-   - 数据同源；坐标在构建时离线算好（见 data/knowledge.ts），页面不做物理模拟
-   - 渲染层完全重写：配色改用站点语义色（不再十色彩虹），字体、圆角、发丝线全部对齐站点令牌
+   布局与交互全部照桌面版《知识关系图.html》的做法来：
+   - 坐标离线算好（见 data/knowledge.ts），页面不做物理模拟
+   - 标签无条件放在节点正下方：dy = 半径 + 12，水平居中
+   - 拖拽：按住节点拖那个节点；按住空白平移画布
+   - 点击判定优先看 pointerup 的命中目标是不是节点本身，而不是只看位移
+     （拖完节点后位移必然很大，纯阈值会把点击误判成拖拽）
+   - 不做滚轮缩放
 
-   动效设计（每条都有理由；受 MOTION 三级降级控制）
-   1. 节点从团心向外"炸开"就位        → 交代"这些学科本来是一团，被关系撑开了"
-   2. 连线从起点生长到终点（dashoffset）→ 视觉上"接线"，比淡入更像关系被建立
-   3. 标签在节点就位后浮现            → 先看结构，再读名字，避免一开始满屏文字
-   4. 高连通节点极慢呼吸光晕          → 标记"枢纽"，同时是静止页面上的唯一活物
-   5. 悬停高亮邻接 / 点击展开面板      → 反馈与状态迁移
+   只有渲染层是重写的：配色换成站点语义色（否则浅色配色在深色站里会割裂），
+   动效走 GSAP 并受 MOTION 三级降级控制。
    ========================================================================= */
 
 import { useCallback, useRef, useState } from 'react';
 import {
   NODES,
   LINKS,
-  TOOLS,
-  CAT_META,
   VIEW,
+  CAT_META,
   type KnowledgeLink,
   type KnowledgeNode,
 } from '../data/knowledge';
-import { gsap, useGSAP, ScrollTrigger, MOTION, canAnimateDecor, canAnimateBase } from '../lib/motion';
+import { gsap, useGSAP, ScrollTrigger, canAnimateDecor, canAnimateBase } from '../lib/motion';
 
 /* 语义色 → 站点令牌。不用十色彩虹，靠色相家族分组 */
 const COLOR_VAR: Record<string, string> = {
@@ -34,22 +33,13 @@ const COLOR_VAR: Record<string, string> = {
   iris: 'var(--color-iris)',
 };
 
-type Props = {
-  /** preview：首页静态版（只有入场与呼吸，不响应鼠标）；full：详情页可交互 */
-  variant?: 'preview' | 'full';
-  className?: string;
-  /** 点击节点时回调（full 版用） */
-  onPick?: (node: KnowledgeNode | null) => void;
-  /** 当前选中的节点 id（full 版受控） */
-  picked?: string | null;
-};
-
 const VW = VIEW.w;
 const VH = VIEW.h;
-/* 所有视觉常量原本按 0..1 尺度写，这里统一折算到 1000 基准 */
-const U = 1000 / VIEW.w;
 
-/** 节点 id → 邻接 id 集合 */
+/** 画布内的位置，可被拖动改变 */
+type Pos = { x: number; y: number };
+
+/** 节点 id → 邻接集合 */
 const ADJ: Record<string, Set<string>> = (() => {
   const m: Record<string, Set<string>> = {};
   for (const n of NODES) m[n.id] = new Set();
@@ -60,14 +50,151 @@ const ADJ: Record<string, Set<string>> = (() => {
   return m;
 })();
 
-export default function KnowledgeGraph({ variant = 'preview', className = '', onPick, picked = null }: Props) {
+/** 节点 id → 半径（命中检测要用） */
+const R_OF: Record<string, number> = Object.fromEntries(NODES.map((n) => [n.id, n.r]));
+
+/** 门类 → 语义色（拍平，省掉每帧查表） */
+const CAT_COLOR_OF: Record<string, string> = Object.fromEntries(
+  Object.entries(CAT_META).map(([k, v]) => [k, v.color]),
+);
+
+type Props = {
+  /** preview：首页静态版（只有入场与呼吸）；full：详情页可拖拽可点击 */
+  variant?: 'preview' | 'full';
+  className?: string;
+  onPick?: (node: KnowledgeNode | null) => void;
+  picked?: string | null;
+};
+
+export default function KnowledgeGraph({
+  variant = 'preview',
+  className = '',
+  onPick,
+  picked = null,
+}: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const panRef = useRef<SVGGElement>(null);
   const [hover, setHover] = useState<string | null>(null);
 
-  /* 高亮的对象：悬停优先，其次选中 */
+  /* 节点位置。初始值来自离线数据；拖动后只改这里，数据文件不动。 */
+  const [pos, setPos] = useState<Record<string, Pos>>(() =>
+    Object.fromEntries(NODES.map((n) => [n.id, { x: n.x, y: n.y }])),
+  );
+
+  /* 悬停优先，其次选中 */
   const focusId = hover ?? picked;
+  const interactive = variant === 'full';
+
+  /* 拖动状态。用 ref，避免每次 pointermove 都触发额外渲染。 */
+  const dragRef = useRef<{
+    part: 'node' | 'pan';
+    id?: string;
+    x: number;
+    y: number;
+    tx: number;
+    ty: number;
+    moved: boolean;
+    downX: number;
+    downY: number;
+  } | null>(null);
+  /* 平移偏移。跟缩放不同，这里只做纯平移，节点坐标不受影响。 */
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const panRefState = useRef(pan);
+  panRefState.current = pan;
+
+  /* 屏幕坐标 → viewBox 坐标 */
+  const toView = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const r = svg.getBoundingClientRect();
+    return {
+      x: VIEW.x + ((clientX - r.left) / r.width) * VW,
+      y: VIEW.y + ((clientY - r.top) / r.height) * VH,
+    };
+  }, []);
+
+  /* 命中检测：从"最上层"（数组末尾、也是最小的点）往回找，与桌面版一致 */
+  const hitTest = useCallback(
+    (clientX: number, clientY: number) => {
+      const p = toView(clientX, clientY);
+      /* 平移偏移要减掉，否则平移后点不中 */
+      const wx = p.x - panRefState.current.x;
+      const wy = p.y - panRefState.current.y;
+      for (let i = NODES.length - 1; i >= 0; i--) {
+        const n = NODES[i];
+        const q = pos[n.id];
+        const rr = R_OF[n.id] + 4;
+        if ((wx - q.x) ** 2 + (wy - q.y) ** 2 <= rr * rr) return n;
+      }
+      return null;
+    },
+    [pos, toView],
+  );
+
+  /* ------------------------------------------------------------ 指针交互 */
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!interactive) return;
+    const hit = hitTest(e.clientX, e.clientY);
+    /* downX/downY 必须在这里初始化：只靠 pointermove 更新的话，
+       "按下即抬起"（触屏轻点、辅助输入）会把点击误判成拖拽。 */
+    dragRef.current = {
+      part: hit ? 'node' : 'pan',
+      id: hit?.id,
+      x: hit ? pos[hit.id].x : 0,
+      y: hit ? pos[hit.id].y : 0,
+      tx: panRefState.current.x,
+      ty: panRefState.current.y,
+      moved: false,
+      downX: e.clientX,
+      downY: e.clientY,
+    };
+    try {
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    } catch {
+      /* 合成事件没有真实 pointerId 时会抛，忽略即可 */
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!interactive) return;
+    const d = dragRef.current;
+    if (!d) {
+      /* 没有按下时做悬停探测 */
+      const hit = hitTest(e.clientX, e.clientY);
+      setHover(hit ? hit.id : null);
+      return;
+    }
+    const p = toView(e.clientX, e.clientY);
+    if (d.part === 'node' && d.id) {
+      d.moved = true;
+      const wx = p.x - d.tx;
+      const wy = p.y - d.ty;
+      setPos((prev) => ({ ...prev, [d.id!]: { x: wx, y: wy } }));
+    } else {
+      d.moved = true;
+      setPan({ x: d.tx + (e.clientX - d.downX), y: d.ty + (e.clientY - d.downY) });
+    }
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!interactive) return;
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (!d) return;
+
+    /* 点击判定照桌面版：优先看 pointerup 的命中目标是不是节点本身，
+       这比纯位移阈值稳 —— 拖完节点后位移必然很大，阈值法会把点击吃掉。 */
+    const hitTarget = !!(e.target as Element)?.closest?.('[data-node]');
+    const dist = Math.hypot(e.clientX - d.downX, e.clientY - d.downY);
+    const isClick = (hitTarget || dist <= 6) && dist <= 10;
+
+    if (d.part === 'node' && d.id && isClick) {
+      onPick?.(picked === d.id ? null : (NODES.find((n) => n.id === d.id) ?? null));
+    } else if (d.part === 'pan' && isClick) {
+      onPick?.(null); /* 点空白 → 关面板 */
+    }
+  };
 
   /* ---------------------------------------------------------------- 入场动效 */
   useGSAP(
@@ -93,14 +220,10 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
         defaults: { ease: 'power3.out' },
       });
 
-      /* 0) 整片从"失焦"浮现 —— 比单纯淡入更有进入感 */
-      tl.fromTo(
-        svg,
-        { opacity: 0, filter: 'blur(10px)' },
-        { opacity: 1, filter: 'blur(0px)', duration: 0.85 },
-      );
+      /* 整片从"失焦"浮现 —— 比单纯淡入更有进入感 */
+      tl.fromTo(svg, { opacity: 0, filter: 'blur(10px)' }, { opacity: 1, filter: 'blur(0px)', duration: 0.85 });
 
-      /* 1) 连线"接线"：先给每根线算好长度，再用 dashoffset 收回 */
+      /* 连线"接线"：先按各自长度设 dashoffset，再收回 */
       if (canAnimateDecor()) {
         linkEls.forEach((el) => {
           const len = el.getTotalLength ? el.getTotalLength() : 100;
@@ -112,34 +235,21 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
             strokeDashoffset: 0,
             duration: 1.15,
             ease: 'power2.inOut',
-            /* 从中心枢纽向外扩散地接线 */
             stagger: { each: 0.004, from: 'center', grid: 'auto' },
           },
           0.1,
         );
       }
 
-      /* 2) 节点从团心炸开就位：位移 + 半径弹出，带一点回弹 */
-      const nodeState = new Map<SVGGElement, { x: number; y: number }>();
-      for (const n of NODES) nodeState.set(null as never, { x: 0, y: 0 });
+      /* 节点从团心炸开就位 */
       tl.fromTo(
         nodeEls,
-        {
-          scale: 0,
-          opacity: 0,
-          transformOrigin: 'center center',
-        },
-        {
-          scale: 1,
-          opacity: 1,
-          duration: 0.7,
-          ease: 'back.out(1.7)',
-          stagger: { each: 0.012, from: 'random' },
-        },
+        { scale: 0, opacity: 0, transformOrigin: 'center center' },
+        { scale: 1, opacity: 1, duration: 0.7, ease: 'back.out(1.7)', stagger: { each: 0.012, from: 'random' } },
         0.25,
       );
 
-      /* 3) 标签最后浮现：先看结构，再读名字 */
+      /* 标签最后浮现：先看结构，再读名字 */
       tl.fromTo(
         labelEls,
         { opacity: 0, y: -4 },
@@ -147,7 +257,7 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
         '-=0.35',
       );
 
-      /* 4) 枢纽呼吸（仅装饰层，且只在没有交互聚焦时保持低调） */
+      /* 枢纽呼吸光晕 */
       if (canAnimateDecor() && hubEls.length) {
         hubEls.forEach((el, i) => {
           gsap.to(el, {
@@ -172,89 +282,7 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
     { scope: rootRef, dependencies: [variant] },
   );
 
-  /* ------------------------------------------------- full 版：拖动平移与滚轮缩放
-     桌面版本来就能拖能缩，上一轮我误以为"多出来的控件"把它们一起去掉了。
-     这里按桌面版的交互做回来：拖动平移、滚轮以光标为锚点缩放、双击复位。
-     位置本身仍是离线算好的静态布局，交互只改视图变换，不改节点坐标。 */
-  const viewRef = useRef({ zoom: 1, x: 0, y: 0 });
-  const dragRef = useRef<{ x: number; y: number; px: number; py: number; moved: boolean } | null>(null);
-
-  const applyView = useCallback(() => {
-    const g = panRef.current;
-    if (!g) return;
-    const { zoom, x, y } = viewRef.current;
-    g.setAttribute('transform', `translate(${x} ${y}) scale(${zoom})`);
-  }, []);
-
-  const resetView = useCallback(() => {
-    viewRef.current = { zoom: 1, x: 0, y: 0 };
-    applyView();
-  }, [applyView]);
-
-  /* 挂载时就把初始 transform 写上（否则第一次交互前它是空的，
-     既不利于调试，也让"复位"看起来像没生效） */
-  useGSAP(
-    () => {
-      applyView();
-    },
-    { scope: rootRef, dependencies: [variant] },
-  );
-
-  const zoomBy = useCallback(
-    (k: number, cx = VIEW.x + VW / 2, cy = VIEW.y + VH / 2) => {
-      const v = viewRef.current;
-      const next = Math.min(4, Math.max(0.6, v.zoom * k));
-      v.x = cx - (cx - v.x) * (next / v.zoom);
-      v.y = cy - (cy - v.y) * (next / v.zoom);
-      v.zoom = next;
-      applyView();
-    },
-    [applyView],
-  );
-
-  /* 屏幕坐标 → viewBox 坐标（等比缩放，只需线性换算） */
-  const toView = useCallback((clientX: number, clientY: number) => {
-    const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
-    const r = svg.getBoundingClientRect();
-    return {
-      x: VIEW.x + ((clientX - r.left) / r.width) * VW,
-      y: VIEW.y + ((clientY - r.top) / r.height) * VH,
-    };
-  }, []);
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (variant !== 'full') return;
-    /* 点在节点上时不启动平移，交给节点的点击处理 */
-    if ((e.target as Element)?.closest?.('[data-node]')) return;
-    dragRef.current = { x: e.clientX, y: e.clientY, px: viewRef.current.x, py: viewRef.current.y, moved: false };
-    /* 用 try 包住：某些情况下（pointer 已失效、合成事件没有真实 pointerId）
-       setPointerCapture 会抛 NotFoundError，一旦抛出后面的逻辑就不会执行，
-       表现成"拖不动"。捕获本身只是锦上添花，失败也不该影响平移。 */
-    try { (e.currentTarget as Element).setPointerCapture?.(e.pointerId); } catch { /* 忽略 */ }
-  };
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (variant !== 'full' || !dragRef.current) return;
-    const d = dragRef.current;
-    const svg = svgRef.current;
-    if (!svg) return;
-    const r = svg.getBoundingClientRect();
-    const dx = (e.clientX - d.x) * (VW / r.width);
-    const dy = (e.clientY - d.y) * (VH / r.height);
-    if (Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 4) d.moved = true;
-    viewRef.current.x = d.px + dx;
-    viewRef.current.y = d.py + dy;
-    applyView();
-  };
-  const onPointerUp = () => { dragRef.current = null; };
-
-  const onWheel = (e: React.WheelEvent) => {
-    if (variant !== 'full') return;
-    const p = toView(e.clientX, e.clientY);
-    zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12, p.x, p.y);
-  };
-
-  /* 高亮状态：非邻接的一切都退到背景 */
+  /* -------------------------------------------------------------- 高亮状态 */
   const isDim = (id: string) => {
     if (!focusId) return false;
     if (id === focusId) return false;
@@ -262,8 +290,6 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
   };
   const linkActive = (l: KnowledgeLink) => focusId !== null && (l.a === focusId || l.b === focusId);
   const linkDim = (l: KnowledgeLink) => focusId !== null && !linkActive(l);
-
-  const interactive = variant === 'full';
 
   return (
     <div
@@ -281,30 +307,28 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerLeave={onPointerUp}
-        onWheel={onWheel}
-        onDoubleClick={interactive ? resetView : undefined}
-        style={{ cursor: interactive ? 'grab' : 'default', touchAction: interactive ? 'none' : undefined }}
+        onPointerLeave={() => setHover(null)}
+        style={{
+          cursor: interactive ? 'grab' : 'default',
+          touchAction: interactive ? 'none' : undefined,
+          userSelect: 'none',
+        }}
       >
         <defs>
-          {/* 枢纽的柔光：不用滤镜，用径向渐变叠加，更省 */}
+          {/* 枢纽柔光：用径向渐变叠加，比滤镜省 */}
           <radialGradient id="kg-hub" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.35" />
             <stop offset="70%" stopColor="var(--color-accent)" stopOpacity="0.06" />
             <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0" />
           </radialGradient>
-          {/* 这里原本有一个"四周压暗"的暗角 rect（mix-blend multiply）。
-              在浅底页面上它看不出来，但在本站的深底上会变成一块明显的暗矩形，
-              看起来就像图外面套了个框，标签压到边缘也像被切。
-              桌面版没有这一层，直接去掉。 */}
         </defs>
 
-        <g ref={panRef} data-pan>
+        <g ref={panRef} data-pan transform={`translate(${pan.x} ${pan.y})`}>
           {/* ---- 连线：团内实线承担结构，跨团虚线退到背景 ---- */}
           <g>
             {LINKS.map((l, i) => {
-              const a = NODES.find((n) => n.id === l.a)!;
-              const b = NODES.find((n) => n.id === l.b)!;
+              const a = pos[l.a];
+              const b = pos[l.b];
               const active = linkActive(l);
               const dim = linkDim(l);
               return (
@@ -316,46 +340,33 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
                   x2={b.x}
                   y2={b.y}
                   stroke={active ? 'var(--color-accent)' : 'var(--color-text)'}
-                  /* 线宽统一为 1.6（1000 基准）：
-                     之前按两端度数加权的粗细，在 239 条边的密度下只会显脏 ——
-                     层级靠"团内实线 / 跨团虚线 + 透明度"表达就够了。 */
                   strokeWidth={1.6}
-                  strokeOpacity={active ? 0.85 : dim ? 0.06 : l.same ? 0.20 : 0.10}
+                  strokeOpacity={active ? 0.85 : dim ? 0.06 : l.same ? 0.2 : 0.1}
                   strokeDasharray={l.same ? undefined : '8 10'}
-                  style={{ transition: 'stroke-opacity 260ms ease, stroke 260ms ease' }}
+                  style={{ transition: 'stroke-opacity 220ms ease, stroke 220ms ease' }}
                 />
               );
             })}
           </g>
 
-          {/* ---- 节点 ---- */}
+          {/* ---- 节点：实心圆 + 正下方的标签 ---- */}
           <g>
             {NODES.map((n) => {
-              const cat = CAT_META[n.cat];
-              const color = COLOR_VAR[cat.color];
+              const color = COLOR_VAR[CAT_COLOR_OF[n.cat]];
               const dim = isDim(n.id);
               const isFocus = n.id === focusId;
               const isHub = n.deg >= 15;
+              const q = pos[n.id];
               return (
                 <g
                   key={n.id}
                   data-node
-                  transform={`translate(${n.x} ${n.y})`}
+                  transform={`translate(${q.x} ${q.y})`}
                   style={{
-                    opacity: dim ? 0.14 : 1,
-                    transition: 'opacity 260ms ease',
+                    opacity: dim ? 0.12 : 1,
+                    transition: 'opacity 220ms ease',
                     cursor: interactive ? 'pointer' : 'default',
                   }}
-                  onPointerEnter={interactive ? () => setHover(n.id) : undefined}
-                  onPointerLeave={interactive ? () => setHover(null) : undefined}
-                  onClick={
-                    interactive
-                      ? (ev) => {
-                          ev.stopPropagation();
-                          onPick?.(isFocus ? null : n);
-                        }
-                      : undefined
-                  }
                 >
                   {/* 枢纽柔光（呼吸层） */}
                   {isHub && canAnimateDecor() ? (
@@ -367,39 +378,32 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
                       style={{ mixBlendMode: 'screen' }}
                     />
                   ) : null}
-                  {/* 圆点本体：实心圆。
-                      之前是半透明填充（按度数 0.30~0.85 渐变），叠在深底上会发灰、
-                      也会透出后面的连线，看起来脏。改成实心纯色。
-                      只有"被淡出"时才降透明度，那是交互反馈，不是常态。 */}
-                  <circle
-                    r={n.r}
-                    fill={color}
-                    fillOpacity={dim ? 0.12 : 1}
-                    stroke={color}
-                    strokeWidth={isFocus ? 2.6 : 0}
-                    strokeOpacity={1}
-                    style={{ transition: 'fill-opacity 260ms ease' }}
-                  />
+                  {/* 选中时的一圈细环（fill 保持实心，不加半透明填充） */}
+                  {isFocus ? (
+                    <circle
+                      r={n.r + 6}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={1.6}
+                      opacity={0.9}
+                      style={{ pointerEvents: 'none' }}
+                    />
+                  ) : null}
+                  <circle r={n.r} fill={color} fillOpacity={1} />
+                  {/* 标签：一律在节点正下方（dy = 半径 + 12），与桌面版一致。
+                      不做翻转、不做水平偏移 —— 用户明确要求"所有文字在节点下方"。 */}
                   <text
                     data-label
-                    /* dx/dy 都是相对节点的偏移，且已按"文字基线"语义算好，
-                       直接接在 translate 到节点的分组里即可。
-                       两个轴都要用：只给 y 会让左右放置的标签被摆回节点正中间。 */
-                    x={n.labelDx}
-                    y={n.labelDy}
+                    y={n.r + 12}
                     textAnchor="middle"
-                    /* 字号分档与桌面版一致（r>17 → 12.5 / r>10 → 11 / 其余 10），
-                       桌面版就是这样贴紧节点的。 */
                     fontSize={n.r > 17 ? 12.5 : n.r > 10 ? 11 : 10}
                     fill={isFocus ? 'var(--color-text)' : 'var(--color-muted)'}
                     style={{
                       fontFamily: 'var(--font-sans)',
                       letterSpacing: '0.01em',
-                      transition: 'fill 260ms ease',
-                      /* labelDy 为 0 表示离线排布时没找到不重叠的位置 —— 直接不渲染。
-                         用 display:none 而不是 opacity:0：前者真正退出布局，
-                         否则"看起来隐藏了"但仍占位，评估时也会被算进去。 */
-                      display: n.labelDy === 0 ? 'none' : undefined,
+                      transition: 'fill 220ms ease',
+                      /* 文字不参与命中，拖拽与点击都由圆来接收 */
+                      pointerEvents: 'none',
                     }}
                   >
                     {n.name}
@@ -413,5 +417,3 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
     </div>
   );
 }
-
-export { ADJ as KNOWLEDGE_ADJ, TOOLS as KNOWLEDGE_TOOLS, CAT_META as KNOWLEDGE_CAT };
