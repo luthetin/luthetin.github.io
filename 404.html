@@ -12,13 +12,17 @@
 <meta property="og:description" content="独立开发者 / AI 设计师 / 自媒体博主 / 诗人。两个开源项目，两本诗集，44 首诗词。">
 <meta property="og:image" content="https://luthetin.github.io/hero.jpg">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2308080a'/%3E%3Ctext x='16' y='22' font-size='17' font-family='monospace' fill='%23e0708f' text-anchor='middle'%3E周%3C/text%3E%3C/svg%3E">
-  <script type="module" crossorigin src="/assets/index-CQJeWePg.js"></script>
+  <script type="module" crossorigin src="/assets/index-CATMQCoO.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-BHI-U8AY.css">
 </head>
 <body>
 <div id="root"></div>
 <script>
-  /* 404.html 专用：让 /work/xxx 这类深链落到前端路由上 */
+  /* 404.html 专用：让 /work/xxx 这类深链落到前端路由上。
+     ⚠ 这里必须把 pathname + search + hash 一起带走：
+     以前只带 pathname（或带了 search 但没在前端还原），结果是
+     "/work/knowledge?noperf=1" 会被改写成 "/?p=%2Fwork%2Fknowledge"，
+     查询串丢失、路由也没被还原，最终静默回落到首页 —— 带任何 ? 参数的深链都会失败。 */
   (function () {
     var l = location;
     var path = l.pathname + l.search + l.hash;
