@@ -61,19 +61,22 @@ export default function Knowledge() {
       meta={`${KNOWLEDGE_META.clusters} 个门类 · 连接最多的是「${KNOWLEDGE_META.topNode}」（${KNOWLEDGE_META.topDeg} 条）`}
       lead="一门知识是一个节点，两门有联系就连一条线。连线越多，节点越大。这不是装饰图：它按我实际整理的学科关系排布，用来回答一个问题 —— 我想学的这些东西，彼此是怎么长在一起的。"
     >
-      {/* ---------------------------------------------------------- 主图 */}
+      {/* ---------------------------------------------------------- 主图
+          这里刻意不再套一层带边框的容器：
+          页面本身已经有 .plate 的门形框，图再套一层就成了"画中画的窗口"，
+          观感上像是嵌了个 iframe。直接铺在页面上更干净。 */}
       <section>
-        <div className="plate">
+        <div className="w-full">
           <KnowledgeGraph
             variant="full"
-            className="aspect-[1015/709] w-full"
+            className="aspect-[1055/718] w-full"
             picked={picked?.id ?? null}
             onPick={(n) => setPicked(n)}
           />
         </div>
 
-        <p className="mono-label mt-4">
-          悬停看邻接 · 点击节点展开工具与内容 · 滚轮缩放 · 拖动平移 · 右下角可复位
+        <p className="mono-label mt-5">
+          悬停看邻接 · 点击节点展开该学科的工具与内容
         </p>
       </section>
 

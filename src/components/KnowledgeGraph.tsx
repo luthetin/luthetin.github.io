@@ -181,75 +181,6 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
     { scope: rootRef, dependencies: [variant] },
   );
 
-  /* ------------------------------------------------------- full 版：缩放与平移 */
-  const viewRef = useRef({ zoom: 1, x: 0, y: 0 });
-  const dragRef = useRef<{ x: number; y: number; px: number; py: number; moved: boolean } | null>(null);
-
-  const applyView = useCallback(() => {
-    const g = panRef.current;
-    if (!g) return;
-    const { zoom, x, y } = viewRef.current;
-    g.setAttribute('transform', `translate(${x} ${y}) scale(${zoom})`);
-  }, []);
-
-  const resetView = useCallback(() => {
-    viewRef.current = { zoom: 1, x: 0, y: 0 };
-    applyView();
-  }, [applyView]);
-
-  const zoomBy = useCallback(
-    (k: number, cx = VIEW.x + VW / 2, cy = VIEW.y + VH / 2) => {
-      const v = viewRef.current;
-      const next = Math.min(4, Math.max(0.6, v.zoom * k));
-      /* 以光标/中心为锚点缩放 */
-      v.x = cx - (cx - v.x) * (next / v.zoom);
-      v.y = cy - (cy - v.y) * (next / v.zoom);
-      v.zoom = next;
-      applyView();
-    },
-    [applyView],
-  );
-
-  /* 把屏幕坐标换算成 viewBox 坐标（viewBox 是等比缩放的，所以只需线性换算） */
-  const toView = useCallback((clientX: number, clientY: number) => {
-    const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
-    const r = svg.getBoundingClientRect();
-    return { x: ((clientX - r.left) / r.width) * VW, y: ((clientY - r.top) / r.height) * VH };
-  }, []);
-
-  /* 拖动平移（仅 full 版） */
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (variant !== 'full') return;
-    dragRef.current = { x: e.clientX, y: e.clientY, px: viewRef.current.x, py: viewRef.current.y, moved: false };
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-  };
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (variant !== 'full' || !dragRef.current) return;
-    const d = dragRef.current;
-    const svg = svgRef.current;
-    if (!svg) return;
-    const r = svg.getBoundingClientRect();
-    const kx = VW / r.width;
-    const ky = VH / r.height;
-    const dx = (e.clientX - d.x) * kx;
-    const dy = (e.clientY - d.y) * ky;
-    if (Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 4) d.moved = true;
-    viewRef.current.x = d.px + dx;
-    viewRef.current.y = d.py + dy;
-    applyView();
-  };
-  const onPointerUp = () => {
-    dragRef.current = null;
-  };
-
-  const onWheel = (e: React.WheelEvent) => {
-    if (variant !== 'full') return;
-    const p = toView(e.clientX, e.clientY);
-    /* wheel 只用于缩放，缩放锁定在 viewBox 内 */
-    zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12, p.x, p.y);
-  };
-
   /* 高亮状态：非邻接的一切都退到背景 */
   const isDim = (id: string) => {
     if (!focusId) return false;
@@ -274,12 +205,7 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
         className="h-full w-full"
         role={interactive ? 'application' : 'img'}
         aria-label={`知识谱系：${NODES.length} 门学科、${LINKS.length} 条关联`}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerLeave={onPointerUp}
-        onWheel={onWheel}
-        style={{ cursor: interactive ? 'grab' : 'default', touchAction: interactive ? 'none' : undefined }}
+        style={{ cursor: interactive ? 'default' : 'default' }}
       >
         <defs>
           {/* 枢纽的柔光：不用滤镜，用径向渐变叠加，更省 */}
@@ -311,8 +237,11 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
                   x2={b.x}
                   y2={b.y}
                   stroke={active ? 'var(--color-accent)' : 'var(--color-text)'}
-                  strokeWidth={(l.same ? 2.2 : 1.2) + l.w * (l.same ? 1.8 : 1.1)}
-                  strokeOpacity={active ? 0.85 : dim ? 0.06 : l.same ? 0.16 : 0.075}
+                  /* 线宽统一为 1.6（1000 基准）：
+                     之前按两端度数加权的粗细，在 239 条边的密度下只会显脏 ——
+                     层级靠"团内实线 / 跨团虚线 + 透明度"表达就够了。 */
+                  strokeWidth={1.6}
+                  strokeOpacity={active ? 0.85 : dim ? 0.06 : l.same ? 0.20 : 0.10}
                   strokeDasharray={l.same ? undefined : '8 10'}
                   style={{ transition: 'stroke-opacity 260ms ease, stroke 260ms ease' }}
                 />
@@ -344,7 +273,6 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
                     interactive
                       ? (ev) => {
                           ev.stopPropagation();
-                          if (dragRef.current?.moved) return; /* 拖拽不算点击 */
                           onPick?.(isFocus ? null : n);
                         }
                       : undefined
@@ -360,36 +288,33 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
                       style={{ mixBlendMode: 'screen' }}
                     />
                   ) : null}
-                  {/* 选中时的外环 */}
-                  {isFocus ? (
-                    <circle
-                      r={n.r + 12}
-                      fill="none"
-                      stroke="var(--color-accent)"
-                      strokeWidth={3}
-                      opacity={0.9}
-                    />
-                  ) : null}
+                  {/* 圆点本体：一个实心圆 + 一圈描边。
+                      之前还叠了一个内芯，结果读起来像靶心 —— 去掉。 */}
                   <circle
                     r={n.r}
                     fill={color}
-                    fillOpacity={0.16 + degNorm[n.id] * 0.62}
+                    fillOpacity={0.30 + degNorm[n.id] * 0.55}
                     stroke={color}
-                    strokeWidth={2.2 + degNorm[n.id] * 2.2}
-                    style={{ transition: 'fill-opacity 260ms ease' }}
+                    strokeWidth={isFocus ? 2.6 : 1.4}
+                    strokeOpacity={isFocus ? 1 : 0.75}
+                    style={{ transition: 'fill-opacity 260ms ease, stroke-width 200ms ease' }}
                   />
-                  {/* 内芯：让大节点有"实心感"，小点仍是小点 */}
-                  <circle r={Math.max(0.9, n.r * 0.3)} fill={color} fillOpacity={0.85} />
                   <text
                     data-label
-                    y={n.r + 26}
+                    y={n.labelDy}
                     textAnchor="middle"
-                    fontSize={n.r > 24 ? 22 : n.r > 14 ? 19 : 16}
+                    /* 字号压小：1000 基准下 13 大约相当于屏上 11px。
+                       之前 16~22 偏大，是"字和节点、别的字重合"的主因之一。 */
+                    fontSize={n.r > 24 ? 14 : n.r > 14 ? 13 : 12}
                     fill={isFocus ? 'var(--color-text)' : 'var(--color-muted)'}
                     style={{
                       fontFamily: 'var(--font-sans)',
                       letterSpacing: '0.01em',
                       transition: 'fill 260ms ease',
+                      /* labelDy 为 0 表示离线排布时没找到不重叠的位置 —— 直接不渲染。
+                         用 display:none 而不是 opacity:0：前者真正退出布局，
+                         否则"看起来隐藏了"但仍占位，评估时也会被算进去。 */
+                      display: n.labelDy === 0 ? 'none' : undefined,
                     }}
                   >
                     {n.name}
@@ -410,35 +335,6 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
           />
         </g>
       </svg>
-
-      {/* full 版：缩放控件 */}
-      {interactive ? (
-        <div className="pointer-events-auto absolute right-3 bottom-3 flex gap-2">
-          <button
-            type="button"
-            onClick={() => zoomBy(1.25)}
-            className="btn btn-ghost !px-2.5 !py-1.5 !text-[0.72rem]"
-            aria-label="放大"
-          >
-            ＋
-          </button>
-          <button
-            type="button"
-            onClick={() => zoomBy(1 / 1.25)}
-            className="btn btn-ghost !px-2.5 !py-1.5 !text-[0.72rem]"
-            aria-label="缩小"
-          >
-            －
-          </button>
-          <button
-            type="button"
-            onClick={resetView}
-            className="btn btn-ghost !px-2.5 !py-1.5 !text-[0.72rem]"
-          >
-            复位
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
