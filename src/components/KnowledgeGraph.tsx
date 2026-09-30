@@ -13,7 +13,7 @@
    5. 悬停高亮邻接 / 点击展开面板      → 反馈与状态迁移
    ========================================================================= */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   NODES,
   LINKS,
@@ -68,15 +68,6 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
 
   /* 高亮的对象：悬停优先，其次选中 */
   const focusId = hover ?? picked;
-
-  /* 度数归一化，用于节点视觉权重（0..1） */
-  const degNorm = useMemo(() => {
-    const max = Math.max(...NODES.map((n) => n.deg));
-    const min = Math.min(...NODES.map((n) => n.deg));
-    const m: Record<string, number> = {};
-    for (const n of NODES) m[n.id] = (n.deg - min) / (max - min || 1);
-    return m;
-  }, []);
 
   /* ---------------------------------------------------------------- 入场动效 */
   useGSAP(
@@ -376,16 +367,18 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
                       style={{ mixBlendMode: 'screen' }}
                     />
                   ) : null}
-                  {/* 圆点本体：一个实心圆 + 一圈描边。
-                      之前还叠了一个内芯，结果读起来像靶心 —— 去掉。 */}
+                  {/* 圆点本体：实心圆。
+                      之前是半透明填充（按度数 0.30~0.85 渐变），叠在深底上会发灰、
+                      也会透出后面的连线，看起来脏。改成实心纯色。
+                      只有"被淡出"时才降透明度，那是交互反馈，不是常态。 */}
                   <circle
                     r={n.r}
                     fill={color}
-                    fillOpacity={0.30 + degNorm[n.id] * 0.55}
+                    fillOpacity={dim ? 0.12 : 1}
                     stroke={color}
-                    strokeWidth={isFocus ? 2.6 : 1.4}
-                    strokeOpacity={isFocus ? 1 : 0.75}
-                    style={{ transition: 'fill-opacity 260ms ease, stroke-width 200ms ease' }}
+                    strokeWidth={isFocus ? 2.6 : 0}
+                    strokeOpacity={1}
+                    style={{ transition: 'fill-opacity 260ms ease' }}
                   />
                   <text
                     data-label
