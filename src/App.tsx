@@ -50,6 +50,39 @@ function ScrollManager() {
   return null;
 }
 
+/* ----------------------------------------------------------------------------
+   深链回退：把 ?p= 还原成真实地址
+   GitHub Pages 是静态托管，直接访问 /work/xxx 会落到 404.html；
+   那段脚本把原始地址塞进 ?p= 并改成 /?p=...。
+   这里必须"同步、在 Router 挂载之前"还原：
+   BrowserRouter 初始化时读的是 location.pathname，晚一步就来不及，
+   路由会先按 "/" 命中首页 —— 那样带 ? 参数的深链会被静默吞掉。
+   用 replaceState 而不是 pushState：不额外多一条历史记录。
+   -------------------------------------------------------------------------- */
+const RESTORED = (() => {
+  if (typeof window === 'undefined') return null;
+  const { pathname, search, hash } = window.location;
+  if (pathname !== '/') return null;
+  const p = new URLSearchParams(search).get('p');
+  if (!p || !p.startsWith('/')) return null;
+  try {
+    window.history.replaceState(null, '', p);
+    return p;
+  } catch {
+    return null;
+  }
+})();
+
+/* 在模块级还原了地址后，Router 若仍停在旧位置就再同步一次（兜底，不产生历史记录） */
+function RestorePath() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (!RESTORED) return;
+    if (pathname === '/') window.history.replaceState(null, '', RESTORED);
+  }, [pathname]);
+  return null;
+}
+
 export default function App() {
   /* 装饰性动效的总开关：
      - js-anim 表示"JS 已经接管"——只有它存在时待入场元素才隐藏，
@@ -90,6 +123,7 @@ export default function App() {
 
   return (
     <Router>
+      <RestorePath />
       <StillSync />
       <ScrollManager />
 

@@ -211,7 +211,11 @@ log(`✓ 已复制 ${distFiles.length} 个构建产物文件（校验可见 ${vi
    这样用户看到的是正确页面，地址栏也保持干净的 /work/poetry。 */
 const SPA_MARKER = '<div id="root"></div>';
 const spaFallbackScript = `<script>
-  /* 404.html 专用：让 /work/xxx 这类深链落到前端路由上 */
+  /* 404.html 专用：让 /work/xxx 这类深链落到前端路由上。
+     ⚠ 这里必须把 pathname + search + hash 一起带走：
+     以前只带 pathname（或带了 search 但没在前端还原），结果是
+     "/work/knowledge?noperf=1" 会被改写成 "/?p=%2Fwork%2Fknowledge"，
+     查询串丢失、路由也没被还原，最终静默回落到首页 —— 带任何 ? 参数的深链都会失败。 */
   (function () {
     var l = location;
     var path = l.pathname + l.search + l.hash;
