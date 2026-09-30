@@ -267,10 +267,24 @@ export default function KnowledgeGraph({
   /* 卸载时停掉 raf */
   useEffect(() => () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); }, []);
 
-  /* 屏幕坐标 → viewBox 坐标 */
+  /* 屏幕坐标 → viewBox 坐标。
+
+     ⚠ 不能用"(clientX - rect.left) / rect.width * VW" 这种线性换算：
+     SVG 默认 preserveAspectRatio="xMidYMid meet"，容器宽高比与 viewBox 不一致时
+     会在长边方向居中留白。本站实测容器 1320x840（比 1.572）、viewBox 1170x886
+     （比 1.320），水平留白各 105.5px —— 线性换算的误差中位 41.9px、最大 85.3px，
+     比小节点的半径还大，悬停根本命中不了。
+
+     正解是用浏览器给的变换矩阵（getScreenCTM），它把留白、缩放都算进去了。 */
   const toView = useCallback((clientX: number, clientY: number) => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
+    const ctm = svg.getScreenCTM?.();
+    if (ctm && typeof DOMPoint !== 'undefined') {
+      const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+      return { x: p.x, y: p.y };
+    }
+    /* 没有 getScreenCTM（极老环境）时退回线性换算，至少不会崩 */
     const r = svg.getBoundingClientRect();
     return {
       x: VIEW.x + ((clientX - r.left) / r.width) * VW,
@@ -560,7 +574,11 @@ export default function KnowledgeGraph({
               return (
                 <g
                   key={n.id}
-                  data-node
+                  data-node={n.id}
+                  /* data-focus 标记"当前悬停/选中的是不是这个节点"。
+                     渲染本身靠内联 opacity/stroke 表达，DOM 上看不出判定结果，
+                     有了它悬停精度才能被实测（探针读这个属性）。 */
+                  data-focus={isFocus ? '1' : '0'}
                   transform={`translate(${q.x} ${q.y})`}
                   style={{
                     opacity: dim ? 0.12 : 1,
