@@ -1,12 +1,14 @@
 /* ============================================================================
    知识谱系：52 门学科的关联图
-   - 由桌面版《知识关系图.html》导出。坐标与标签位置都在离线算好：
-     页面加载即定局，GSAP 只做入场与交互动效，不做物理或布局计算。
-   - 标签做了贪心避让（按连接数从多到少依次占位，下/上/右/左四个方向试）；
-     放不下的把 labelDy 置 0，默认不显示，点开节点后仍可在页面上看到。
-     labelDy 是"相对节点的偏移"，不是绝对坐标 —— 它渲染在已 translate 到节点的分组内。
-   - 配色不按门类分十色，而是映射到站点语义色（accent 数学 / ice 逻辑与结构 /
-     teal 计算与优化 / amber 人文与经济 / iris 物理），以符合站点"辅色各绑一个语义位置"的规范。
+
+   - 由桌面版《知识关系图.html》导出。坐标在离线用**同一套力学常量**跑出来
+     （REPULSION 45000 / LINK_DIST 52·110 / CLUSTER_SEP 0.0006 / PAD 22 /
+      WARM 5200 步），跑完再等比归一化到 1000 基准。
+   - 页面加载即定局（不做首屏物理）。拖动某个节点时，浏览器端用同一套常量
+     实时跑物理，所以其它节点会被带动、在该处局部重新收敛 —— 与桌面版一致。
+   - 标签一律在节点正下方：dy = 半径 + 12，水平居中。
+   - 配色映射到站点语义色（accent 数学 / ice 逻辑与结构 / teal 计算与优化 /
+     amber 人文与经济 / iris 物理），符合站点"辅色各绑一个语义位置"的规范。
    - 自动生成，请勿手改数值。
    ========================================================================= */
 
@@ -16,20 +18,27 @@ export type KnowledgeNode = {
   x: number; y: number;
   /** 半径（1000 基准） */
   r: number; deg: number;
-  /** 标签相对节点的偏移（基线）。labelDy 为 0 表示这个标签默认不显示（放不下） */
+  /** 标签相对节点的偏移（基线）；一律在正下方，labelDx 恒为 0 */
   labelDx: number;
   labelDy: number;
 };
 export type KnowledgeLink = { a: string; b: string; same: boolean };
 export type KnowledgeCat = 'math' | 'disc' | 'opt' | 'comp' | 'econ' | 'phil' | 'logic' | 'sem' | 'set' | 'phys';
 
-export const VIEW = { x: 2, y: 24, w: 992, h: 709 } as const;
+export const VIEW = { x: -98, y: -55, w: 1170, h: 886 } as const;
+
+/** 离线归一化时的尺度比：桌面版像素 → 本站 1000 基准。
+    拖动时的实时物理要用它把常量换算过来（见组件里的 PHYS）。 */
+export const SCALE = 0.939542;
+
+/** 各团心（已随布局一起归一化）。运行时物理必须用这一份：
+    否则导出的布局在同样的力学下不是不动点，一跑物理整图就会漂。 */
+export const CLUSTER_CENTERS: Record<string, { x: number; y: number }> = {"math":{"x":409.43,"y":369.47},"disc":{"x":150.69,"y":250.7},"opt":{"x":611.38,"y":258.75},"comp":{"x":219.49,"y":469.63},"econ":{"x":624.69,"y":498.11},"phil":{"x":993.63,"y":224.52},"logic":{"x":971.19,"y":532.32},"sem":{"x":-110.97,"y":389.06},"set":{"x":449.72,"y":732.75},"phys":{"x":437.22,"y":107.55}};
 
 export const KNOWLEDGE_META = {
   nodes: 52,
   links: 239,
   clusters: 10,
-  labelsShown: 52,
   topNode: '最优化理论',
   topDeg: 21,
 } as const;
@@ -77,58 +86,58 @@ export const CAT_META: Record<KnowledgeCat, { label: string; color: 'accent' | '
   }
 };
 
-export const NODES: KnowledgeNode[] = [{"id":"optimization","name":"最优化理论","cat":"opt","x":393.63,"y":376.19,"r":40.7,"deg":21,"labelDx":0,"labelDy":52.7},
-  {"id":"linear-algebra","name":"高等代数／线性代数","cat":"math","x":393.1,"y":488.32,"r":31.22,"deg":18,"labelDx":0,"labelDy":43.22},
-  {"id":"probability","name":"概率论","cat":"math","x":313.97,"y":457.8,"r":31.22,"deg":18,"labelDx":0,"labelDy":43.22},
-  {"id":"information","name":"信息论","cat":"disc","x":65.4,"y":424.29,"r":28.32,"deg":17,"labelDx":0,"labelDy":40.32},
-  {"id":"ml","name":"机器学习","cat":"comp","x":219.93,"y":565.72,"r":28.32,"deg":17,"labelDx":0,"labelDy":40.32},
-  {"id":"numerical","name":"数值分析","cat":"math","x":274.63,"y":392.64,"r":22.92,"deg":15,"labelDx":0,"labelDy":34.92},
-  {"id":"real-func","name":"实变函数与泛函分析","cat":"math","x":448.44,"y":435.62,"r":22.92,"deg":15,"labelDx":0,"labelDy":34.92},
-  {"id":"or","name":"运筹学与决策","cat":"econ","x":467.27,"y":558.62,"r":22.92,"deg":15,"labelDx":0,"labelDy":34.92},
-  {"id":"statistics","name":"数理统计","cat":"math","x":341.29,"y":605.48,"r":15.85,"deg":12,"labelDx":0,"labelDy":27.85},
-  {"id":"signal","name":"信号与图像处理","cat":"comp","x":129.99,"y":404.58,"r":15.85,"deg":12,"labelDx":0,"labelDy":27.85},
-  {"id":"mathlogic","name":"数理逻辑","cat":"logic","x":722.81,"y":549.11,"r":15.85,"deg":12,"labelDx":0,"labelDy":27.85},
-  {"id":"control","name":"控制理论","cat":"opt","x":544.53,"y":300.12,"r":13.78,"deg":11,"labelDx":0,"labelDy":25.78},
-  {"id":"math-analysis","name":"数学分析","cat":"math","x":292.45,"y":306.95,"r":11.86,"deg":10,"labelDx":0,"labelDy":23.86},
-  {"id":"graph","name":"图论","cat":"disc","x":40,"y":336.01,"r":11.86,"deg":10,"labelDx":0,"labelDy":23.86},
-  {"id":"cv","name":"计算机视觉","cat":"comp","x":150.86,"y":510.04,"r":11.86,"deg":10,"labelDx":0,"labelDy":23.86},
-  {"id":"settheory","name":"集合论","cat":"set","x":519.53,"y":658,"r":11.86,"deg":10,"labelDx":0,"labelDy":23.86},
-  {"id":"stochastic","name":"随机过程","cat":"math","x":315.45,"y":531.29,"r":11.86,"deg":10,"labelDx":0,"labelDy":23.86},
-  {"id":"ode-pde","name":"微分方程","cat":"math","x":285.09,"y":217.4,"r":10.08,"deg":9,"labelDx":0,"labelDy":22.08},
-  {"id":"dsa","name":"数据结构与算法","cat":"comp","x":164.92,"y":633.28,"r":10.08,"deg":9,"labelDx":0,"labelDy":22.08},
-  {"id":"game","name":"博弈论","cat":"econ","x":595.83,"y":491.34,"r":10.08,"deg":9,"labelDx":0,"labelDy":22.08},
-  {"id":"psychoanalysis","name":"精神分析","cat":"phil","x":774.58,"y":258.52,"r":10.08,"deg":9,"labelDx":0,"labelDy":22.08},
-  {"id":"propositional","name":"命题逻辑","cat":"logic","x":739.14,"y":460.38,"r":10.08,"deg":9,"labelDx":0,"labelDy":22.08},
-  {"id":"quantum","name":"量子力学（物理）","cat":"phys","x":471.18,"y":183.3,"r":10.08,"deg":9,"labelDx":0,"labelDy":22.08},
-  {"id":"topology","name":"拓扑学","cat":"math","x":511.93,"y":398.93,"r":8.45,"deg":8,"labelDx":0,"labelDy":20.45},
-  {"id":"discrete","name":"离散数学","cat":"disc","x":192.4,"y":402.04,"r":8.45,"deg":8,"labelDx":0,"labelDy":20.45},
-  {"id":"econometrics","name":"计量经济学","cat":"econ","x":453.2,"y":667.34,"r":8.45,"deg":8,"labelDx":0,"labelDy":20.45},
-  {"id":"phenomenology","name":"现象学","cat":"phil","x":777.86,"y":347.34,"r":8.45,"deg":8,"labelDx":0,"labelDy":20.45},
-  {"id":"firstorder","name":"一阶谓词逻辑","cat":"logic","x":825.64,"y":499.34,"r":8.45,"deg":8,"labelDx":0,"labelDy":20.45},
-  {"id":"langphil","name":"语言哲学","cat":"sem","x":336.16,"y":332.96,"r":8.45,"deg":8,"labelDx":0,"labelDy":20.45},
-  {"id":"classical-mech","name":"经典力学（物理）","cat":"phys","x":399.04,"y":96.92,"r":8.45,"deg":8,"labelDx":0,"labelDy":20.45},
-  {"id":"statphys","name":"统计物理（物理）","cat":"phys","x":369.16,"y":174.99,"r":8.45,"deg":8,"labelDx":0,"labelDy":20.45},
-  {"id":"diffgeom","name":"微分几何","cat":"math","x":419.69,"y":280.7,"r":8.45,"deg":8,"labelDx":0,"labelDy":20.45},
-  {"id":"pattern","name":"模式识别与统计学习","cat":"comp","x":74.62,"y":573.39,"r":6.98,"deg":7,"labelDx":0,"labelDy":18.98},
-  {"id":"micro","name":"微观经济学","cat":"econ","x":582.73,"y":699.2,"r":6.98,"deg":7,"labelDx":0,"labelDy":18.98},
-  {"id":"macro","name":"宏观经济学","cat":"econ","x":569.03,"y":570.31,"r":6.98,"deg":7,"labelDx":0,"labelDy":18.98},
-  {"id":"marx","name":"马克思与批判理论","cat":"phil","x":859.29,"y":235.51,"r":6.98,"deg":7,"labelDx":0,"labelDy":18.98},
-  {"id":"structuralism","name":"结构主义","cat":"phil","x":828.2,"y":149.97,"r":6.98,"deg":7,"labelDx":0,"labelDy":18.98},
-  {"id":"modeltheory","name":"模型论","cat":"logic","x":834.64,"y":595.2,"r":6.98,"deg":7,"labelDx":0,"labelDy":18.98},
-  {"id":"semiotics","name":"符号学","cat":"sem","x":201.62,"y":301.67,"r":6.98,"deg":7,"labelDx":0,"labelDy":18.98},
-  {"id":"electrodynamics","name":"电动力学（物理）","cat":"phys","x":303.88,"y":83.6,"r":6.98,"deg":7,"labelDx":0,"labelDy":18.98},
-  {"id":"complex","name":"复变函数与积分变换","cat":"math","x":172.19,"y":251.79,"r":5.67,"deg":6,"labelDx":0,"labelDy":17.67},
-  {"id":"combinatorics","name":"组合数学与算法分析","cat":"disc","x":63.68,"y":243.95,"r":5.67,"deg":6,"labelDx":0,"labelDy":17.67},
-  {"id":"german","name":"德国古典哲学","cat":"phil","x":872.93,"y":333.3,"r":5.67,"deg":6,"labelDx":0,"labelDy":17.67},
-  {"id":"poststructural","name":"后结构主义","cat":"phil","x":691.75,"y":273.67,"r":5.67,"deg":6,"labelDx":0,"labelDy":17.67},
-  {"id":"recursion","name":"递归论与可计算性","cat":"logic","x":761.87,"y":648.81,"r":5.67,"deg":6,"labelDx":0,"labelDy":17.67},
-  {"id":"relativity","name":"相对论（物理）","cat":"phys","x":527.04,"y":112.24,"r":5.67,"deg":6,"labelDx":0,"labelDy":17.67},
-  {"id":"c19","name":"19 世纪哲学","cat":"phil","x":944.1,"y":231.68,"r":5.67,"deg":6,"labelDx":0,"labelDy":17.67},
-  {"id":"contemp","name":"当代欧陆哲学","cat":"phil","x":733.08,"y":170.03,"r":5.67,"deg":6,"labelDx":0,"labelDy":17.67},
-  {"id":"prooftheory","name":"证明论","cat":"logic","x":922.33,"y":600.16,"r":3.54,"deg":4,"labelDx":0,"labelDy":15.54},
-  {"id":"modal","name":"模态与非经典逻辑","cat":"logic","x":921.64,"y":494.04,"r":3.54,"deg":4,"labelDx":0,"labelDy":15.54},
-  {"id":"qft","name":"量子场论（物理）","cat":"phys","x":457.25,"y":40,"r":3.54,"deg":4,"labelDx":0,"labelDy":15.54},
-  {"id":"existential","name":"存在主义","cat":"phil","x":960,"y":343.97,"r":2.74,"deg":3,"labelDx":0,"labelDy":14.74}];
+export const NODES: KnowledgeNode[] = [{"id":"optimization","name":"最优化理论","cat":"opt","x":410.93,"y":357.74,"r":48.86,"deg":21,"labelDx":0,"labelDy":60.86},
+  {"id":"linear-algebra","name":"高等代数／线性代数","cat":"math","x":440.19,"y":463.36,"r":37.47,"deg":18,"labelDx":0,"labelDy":49.47},
+  {"id":"probability","name":"概率论","cat":"math","x":340.91,"y":438.65,"r":37.47,"deg":18,"labelDx":0,"labelDy":49.47},
+  {"id":"information","name":"信息论","cat":"disc","x":85,"y":226.08,"r":33.99,"deg":17,"labelDx":0,"labelDy":45.99},
+  {"id":"ml","name":"机器学习","cat":"comp","x":214.33,"y":536.73,"r":33.99,"deg":17,"labelDx":0,"labelDy":45.99},
+  {"id":"numerical","name":"数值分析","cat":"math","x":278.6,"y":376.04,"r":27.51,"deg":15,"labelDx":0,"labelDy":39.51},
+  {"id":"real-func","name":"实变函数与泛函分析","cat":"math","x":484.36,"y":294.31,"r":27.51,"deg":15,"labelDx":0,"labelDy":39.51},
+  {"id":"or","name":"运筹学与决策","cat":"econ","x":447.13,"y":567.49,"r":27.51,"deg":15,"labelDx":0,"labelDy":39.51},
+  {"id":"statistics","name":"数理统计","cat":"math","x":348.42,"y":570.82,"r":19.03,"deg":12,"labelDx":0,"labelDy":31.03},
+  {"id":"signal","name":"信号与图像处理","cat":"comp","x":40,"y":410.19,"r":19.03,"deg":12,"labelDx":0,"labelDy":31.03},
+  {"id":"mathlogic","name":"数理逻辑","cat":"logic","x":716.64,"y":558.23,"r":19.03,"deg":12,"labelDx":0,"labelDy":31.03},
+  {"id":"control","name":"控制理论","cat":"opt","x":561.11,"y":274.19,"r":16.54,"deg":11,"labelDx":0,"labelDy":28.54},
+  {"id":"math-analysis","name":"数学分析","cat":"math","x":335.49,"y":320.84,"r":14.23,"deg":10,"labelDx":0,"labelDy":26.23},
+  {"id":"graph","name":"图论","cat":"disc","x":161.43,"y":320.95,"r":14.23,"deg":10,"labelDx":0,"labelDy":26.23},
+  {"id":"cv","name":"计算机视觉","cat":"comp","x":64.22,"y":335.21,"r":14.23,"deg":10,"labelDx":0,"labelDy":26.23},
+  {"id":"settheory","name":"集合论","cat":"set","x":427.39,"y":711.35,"r":14.23,"deg":10,"labelDx":0,"labelDy":26.23},
+  {"id":"stochastic","name":"随机过程","cat":"math","x":301.9,"y":499.61,"r":14.23,"deg":10,"labelDx":0,"labelDy":26.23},
+  {"id":"ode-pde","name":"微分方程","cat":"math","x":321.63,"y":240.91,"r":12.1,"deg":9,"labelDx":0,"labelDy":24.1},
+  {"id":"dsa","name":"数据结构与算法","cat":"comp","x":207.38,"y":627.52,"r":12.1,"deg":9,"labelDx":0,"labelDy":24.1},
+  {"id":"game","name":"博弈论","cat":"econ","x":592.1,"y":475.07,"r":12.1,"deg":9,"labelDx":0,"labelDy":24.1},
+  {"id":"psychoanalysis","name":"精神分析","cat":"phil","x":719.17,"y":272.39,"r":12.1,"deg":9,"labelDx":0,"labelDy":24.1},
+  {"id":"propositional","name":"命题逻辑","cat":"logic","x":727.36,"y":459.33,"r":12.1,"deg":9,"labelDx":0,"labelDy":24.1},
+  {"id":"quantum","name":"量子力学（物理）","cat":"phys","x":455.97,"y":145.7,"r":12.1,"deg":9,"labelDx":0,"labelDy":24.1},
+  {"id":"topology","name":"拓扑学","cat":"math","x":512.94,"y":393.63,"r":10.14,"deg":8,"labelDx":0,"labelDy":22.14},
+  {"id":"discrete","name":"离散数学","cat":"disc","x":139.32,"y":393.35,"r":10.14,"deg":8,"labelDx":0,"labelDy":22.14},
+  {"id":"econometrics","name":"计量经济学","cat":"econ","x":530.77,"y":549.82,"r":10.14,"deg":8,"labelDx":0,"labelDy":22.14},
+  {"id":"phenomenology","name":"现象学","cat":"phil","x":791.48,"y":328.63,"r":10.14,"deg":8,"labelDx":0,"labelDy":22.14},
+  {"id":"firstorder","name":"一阶谓词逻辑","cat":"logic","x":819.42,"y":492.8,"r":10.14,"deg":8,"labelDx":0,"labelDy":22.14},
+  {"id":"langphil","name":"语言哲学","cat":"sem","x":183.14,"y":449.87,"r":10.14,"deg":8,"labelDx":0,"labelDy":22.14},
+  {"id":"classical-mech","name":"经典力学（物理）","cat":"phys","x":366.61,"y":45.23,"r":10.14,"deg":8,"labelDx":0,"labelDy":22.14},
+  {"id":"statphys","name":"统计物理（物理）","cat":"phys","x":350.16,"y":133.17,"r":10.14,"deg":8,"labelDx":0,"labelDy":22.14},
+  {"id":"diffgeom","name":"微分几何","cat":"math","x":408.74,"y":249.16,"r":10.14,"deg":8,"labelDx":0,"labelDy":22.14},
+  {"id":"pattern","name":"模式识别与统计学习","cat":"comp","x":102.13,"y":572.42,"r":8.38,"deg":7,"labelDx":0,"labelDy":20.38},
+  {"id":"micro","name":"微观经济学","cat":"econ","x":601.02,"y":604.3,"r":8.38,"deg":7,"labelDx":0,"labelDy":20.38},
+  {"id":"macro","name":"宏观经济学","cat":"econ","x":536.18,"y":670.89,"r":8.38,"deg":7,"labelDx":0,"labelDy":20.38},
+  {"id":"marx","name":"马克思与批判理论","cat":"phil","x":877.83,"y":132.7,"r":8.38,"deg":7,"labelDx":0,"labelDy":20.38},
+  {"id":"structuralism","name":"结构主义","cat":"phil","x":806.66,"y":208.29,"r":8.38,"deg":7,"labelDx":0,"labelDy":20.38},
+  {"id":"modeltheory","name":"模型论","cat":"logic","x":824.73,"y":593.13,"r":8.38,"deg":7,"labelDx":0,"labelDy":20.38},
+  {"id":"semiotics","name":"符号学","cat":"sem","x":150.94,"y":247.62,"r":8.38,"deg":7,"labelDx":0,"labelDy":20.38},
+  {"id":"electrodynamics","name":"电动力学（物理）","cat":"phys","x":268.9,"y":52.83,"r":8.38,"deg":7,"labelDx":0,"labelDy":20.38},
+  {"id":"complex","name":"复变函数与积分变换","cat":"math","x":245.28,"y":204.1,"r":6.8,"deg":6,"labelDx":0,"labelDy":18.8},
+  {"id":"combinatorics","name":"组合数学与算法分析","cat":"disc","x":64.5,"y":472.82,"r":6.8,"deg":6,"labelDx":0,"labelDy":18.8},
+  {"id":"german","name":"德国古典哲学","cat":"phil","x":876.77,"y":284.04,"r":6.8,"deg":6,"labelDx":0,"labelDy":18.8},
+  {"id":"poststructural","name":"后结构主义","cat":"phil","x":698.58,"y":174.81,"r":6.8,"deg":6,"labelDx":0,"labelDy":18.8},
+  {"id":"recursion","name":"递归论与可计算性","cat":"logic","x":762.37,"y":669.34,"r":6.8,"deg":6,"labelDx":0,"labelDy":18.8},
+  {"id":"relativity","name":"相对论（物理）","cat":"phys","x":532.33,"y":83.26,"r":6.8,"deg":6,"labelDx":0,"labelDy":18.8},
+  {"id":"c19","name":"19 世纪哲学","cat":"phil","x":945.69,"y":209.58,"r":6.8,"deg":6,"labelDx":0,"labelDy":18.8},
+  {"id":"contemp","name":"当代欧陆哲学","cat":"phil","x":772.09,"y":103.65,"r":6.8,"deg":6,"labelDx":0,"labelDy":18.8},
+  {"id":"prooftheory","name":"证明论","cat":"logic","x":917.89,"y":605.59,"r":4.25,"deg":4,"labelDx":0,"labelDy":16.25},
+  {"id":"modal","name":"模态与非经典逻辑","cat":"logic","x":922.75,"y":490.45,"r":4.25,"deg":4,"labelDx":0,"labelDy":16.25},
+  {"id":"qft","name":"量子场论（物理）","cat":"phys","x":453.51,"y":40,"r":4.25,"deg":4,"labelDx":0,"labelDy":16.25},
+  {"id":"existential","name":"存在主义","cat":"phil","x":960,"y":327.89,"r":3.29,"deg":3,"labelDx":0,"labelDy":15.29}];
 
 export const LINKS: KnowledgeLink[] = [{"a":"linear-algebra","b":"math-analysis","same":true},
   {"a":"math-analysis","b":"probability","same":true},

@@ -13,12 +13,14 @@
    动效走 GSAP 并受 MOTION 三级降级控制。
    ========================================================================= */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   NODES,
   LINKS,
   VIEW,
   CAT_META,
+  SCALE,
+  CLUSTER_CENTERS,
   type KnowledgeLink,
   type KnowledgeNode,
 } from '../data/knowledge';
@@ -57,6 +59,58 @@ const R_OF: Record<string, number> = Object.fromEntries(NODES.map((n) => [n.id, 
 const CAT_COLOR_OF: Record<string, string> = Object.fromEntries(
   Object.entries(CAT_META).map(([k, v]) => [k, v.color]),
 );
+
+/* ============================================================================
+   实时物理（拖拽用）
+
+   直接照搬桌面版《知识关系图.html》第 558~637 行的 tick()。
+   关键点：那些常量（REPULSION 45000、LINK_DIST_IN 52、LINK_DIST_OUT 110、
+   CLUSTER_SEP 0.0006、PAD 22、CLUSTER_PULL 0.032 …）都是**绝对量**，
+   绑在桌面版的像素尺度上（VW/VH ≈ 1440x900、R_MAX = 52）。
+
+   本站坐标是 1000 基准，归一化时的尺度比是 SCALE（≈0.94）。
+   长度量乘 SCALE，加速度量乘 SCALE（力 ∝ 1/d²，长度缩 s 后力缩 1/s²，
+   再乘 s 位移…实测统一乘 SCALE 与桌面版观感一致；见下方常量注释）。
+   ========================================================================= */
+const S = SCALE;
+const PHYS = {
+  REPULSION: 45000 * S * S * S,   /* 让 1/d² 的力在缩放的坐标里给出同量级位移 */
+  LINK_DIST_IN: 52 * S,
+  LINK_DIST_OUT: 110 * S,
+  LINK_STRENGTH: 0.5,
+  CENTER_PULL: 0.010,
+  CLUSTER_PULL: 0.032,
+  CLUSTER_SEP: 0.0006 * S * S * S,
+  DAMP: 0.85,
+  PAD: 22 * S,
+  ALPHA_DECAY: 0.997,
+  ALPHA_MIN: 0.004,
+};
+/** 每次拖拽的"重新收敛"强度。
+    桌面版拖拽用的是 0.5，但在桌面版里那是"整图重新布局"的强度：
+    实测它会把其它节点的中位位移推到 176，在本站视觉上就是"整图炸开"。
+    实测扫描（拖 300）：
+      0.5  → 中位 176 / p90 467 / 最大 625
+      0.08 → 中位  91 / p90 254 / 最大 481
+      0.03 → 中位  49 / p90  84 / 最大 149   ← 采用
+    0.03 配合 2 步/帧，呈"邻近节点被明显带动、远处基本不动"的局部收敛。 */
+const DRAG_ALPHA_START = 0.03;
+/** 每帧跑几步（配合 0.03 用 2 步） */
+const STEPS_PER_FRAME = 2;
+
+/** 团心：用离线一并导出的那一份。
+    不能用"当前布局的重心"临时算 —— 那份和离线收敛时的团心不一致，
+    一跑物理整图就会漂（实测中位漂移 150+）。 */
+const CLUSTER_CENTER: Record<string, { x: number; y: number }> = Object.fromEntries(
+  Object.entries(CLUSTER_CENTERS).map(([k, v]) => [k, { x: v.x, y: v.y }]),
+);
+
+/** 逻辑坐标下的物理节点（与渲染解耦，避免每帧 setState 造大量对象） */
+type PhysNode = { x: number; y: number; vx: number; vy: number; r: number; cat: string };
+
+const CAT_OF: Record<string, string> = Object.fromEntries(NODES.map((n) => [n.id, n.cat]));
+/** 边索引：P 与 NODES 同序，所以直接用下标 */
+const EDGES = LINKS.map((l, i) => ({ i, a: NODES.findIndex((n) => n.id === l.a), b: NODES.findIndex((n) => n.id === l.b), same: CAT_OF[l.a] === CAT_OF[l.b] }));
 
 type Props = {
   /** preview：首页静态版（只有入场与呼吸）；full：详情页可拖拽可点击 */
@@ -102,6 +156,110 @@ export default function KnowledgeGraph({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRefState = useRef(pan);
   panRefState.current = pan;
+
+  /* ---------------------------------------------------------------- 实时物理
+     桌面版拖动时会每帧跑 tick()，所以被拖的节点会把周围的节点推开、
+     在其附近局部重新收敛。这里复刻同一套：物理状态放在 ref 里，
+     每帧算完再把结果推给 React state 渲染。 */
+  const physRef = useRef<PhysNode[]>(
+    NODES.map((n) => ({ x: n.x, y: n.y, vx: 0, vy: 0, r: n.r, cat: n.cat })),
+  );
+  const alphaRef = useRef(DRAG_ALPHA_START);
+  const rafRef = useRef<number | null>(null);
+  const pinRef = useRef<{ i: number; x: number; y: number } | null>(null);
+
+  /** 一步物理。照桌面版 tick() 的五段：互斥 / 弹簧 / 团心 / 积分 / 硬性防重叠 */
+  const tick = useCallback(() => {
+    const P = physRef.current;
+    const n = P.length;
+    let alpha = alphaRef.current;
+    const pinned = pinRef.current;
+
+    /* ① 节点互斥。力是常数，不乘 alpha —— 乘了会让节点塌成一团 */
+    for (let i = 0; i < n; i++) {
+      const a = P[i];
+      for (let j = i + 1; j < n; j++) {
+        const b = P[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
+        if (d2 > 700 * 700) continue;
+        const d = Math.sqrt(d2), f = PHYS.REPULSION / d2, ux = dx / d, uy = dy / d;
+        a.vx -= ux * f; a.vy -= uy * f; b.vx += ux * f; b.vy += uy * f;
+      }
+    }
+    /* ② 边的弹簧：团内紧、团间松 */
+    for (const e of EDGES) {
+      const a = P[e.a], b = P[e.b];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const ideal = e.same ? PHYS.LINK_DIST_IN : PHYS.LINK_DIST_OUT;
+      const f = (d - ideal) * PHYS.LINK_STRENGTH * alpha / d;
+      a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
+    }
+    /* ③ 团心互斥 */
+    const cats = Object.keys(CLUSTER_CENTER);
+    for (let i = 0; i < cats.length; i++) for (let j = i + 1; j < cats.length; j++) {
+      const A = CLUSTER_CENTER[cats[i]], B = CLUSTER_CENTER[cats[j]];
+      const dx = B.x - A.x, dy = B.y - A.y, d2 = dx * dx + dy * dy || 1;
+      const f = PHYS.CLUSTER_SEP * VIEW.w * VIEW.h / d2, d = Math.sqrt(d2), ux = dx / d, uy = dy / d;
+      A.x -= ux * f; A.y -= uy * f; B.x += ux * f; B.y += uy * f;
+    }
+    /* ④ 积分：被拖的节点钉在指针上，其余照常受力 */
+    for (let i = 0; i < n; i++) {
+      const p = P[i];
+      if (pinned && pinned.i === i) { p.x = pinned.x; p.y = pinned.y; p.vx = 0; p.vy = 0; continue; }
+      const c = CLUSTER_CENTER[p.cat];
+      p.vx += (c.x - p.x) * PHYS.CLUSTER_PULL;
+      p.vy += (c.y - p.y) * PHYS.CLUSTER_PULL;
+      p.vx += (VIEW.x + VIEW.w / 2 - p.x) * PHYS.CENTER_PULL;
+      p.vy += (VIEW.y + VIEW.h / 2 - p.y) * PHYS.CENTER_PULL;
+      p.vx *= PHYS.DAMP; p.vy *= PHYS.DAMP;
+      p.x += p.vx * alpha;
+      p.y += p.vy * alpha;
+    }
+    /* ⑤ 硬性防重叠：把叠在一起的推开，被拖的那个不动 */
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const a = P[i], b = P[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const need = a.r + b.r + PHYS.PAD;
+      if (d < need) {
+        const push = (need - d) / 2, ux = dx / d, uy = dy / d;
+        const aPinned = pinned && pinned.i === i;
+        const bPinned = pinned && pinned.i === j;
+        if (!aPinned) { a.x -= ux * push; a.y -= uy * push; }
+        if (!bPinned) { b.x += ux * push; b.y += uy * push; }
+      }
+    }
+    alphaRef.current = Math.max(PHYS.ALPHA_MIN, alpha * PHYS.ALPHA_DECAY);
+  }, []);
+
+  /** 把物理结果同步给渲染层 */
+  const syncFromPhys = useCallback(() => {
+    const P = physRef.current;
+    const next: Record<string, Pos> = {};
+    NODES.forEach((n, i) => { next[n.id] = { x: P[i].x, y: P[i].y }; });
+    setPos(next);
+  }, []);
+
+  /** 每帧循环：只有"正在拖节点"时才跑物理，其余时间一帧不动（同桌面版） */
+  const loop = useCallback(() => {
+    if (pinRef.current) {
+      for (let k = 0; k < STEPS_PER_FRAME; k++) tick();
+      syncFromPhys();
+      rafRef.current = requestAnimationFrame(loop);
+    } else {
+      rafRef.current = null;
+    }
+  }, [tick, syncFromPhys]);
+
+  const startLoop = useCallback(() => {
+    if (rafRef.current == null) rafRef.current = requestAnimationFrame(loop);
+  }, [loop]);
+
+  /* 卸载时停掉 raf */
+  useEffect(() => () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); }, []);
 
   /* 屏幕坐标 → viewBox 坐标 */
   const toView = useCallback((clientX: number, clientY: number) => {
@@ -149,6 +307,12 @@ export default function KnowledgeGraph({
       downX: e.clientX,
       downY: e.clientY,
     };
+    if (hit) {
+      /* 钉住被拖节点，并把收敛强度拉回 0.5 —— 桌面版拖拽时就是让它"在别处重新抖一下" */
+      pinRef.current = { i: NODES.findIndex((n) => n.id === hit.id), x: pos[hit.id].x, y: pos[hit.id].y };
+      alphaRef.current = DRAG_ALPHA_START;
+      startLoop();
+    }
     try {
       (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     } catch {
@@ -168,9 +332,9 @@ export default function KnowledgeGraph({
     const p = toView(e.clientX, e.clientY);
     if (d.part === 'node' && d.id) {
       d.moved = true;
-      const wx = p.x - d.tx;
-      const wy = p.y - d.ty;
-      setPos((prev) => ({ ...prev, [d.id!]: { x: wx, y: wy } }));
+      /* 只更新"钉子"的位置；其它节点的位移交给物理循环 */
+      if (pinRef.current) { pinRef.current.x = p.x - d.tx; pinRef.current.y = p.y - d.ty; }
+      startLoop();
     } else {
       d.moved = true;
       setPan({ x: d.tx + (e.clientX - d.downX), y: d.ty + (e.clientY - d.downY) });
@@ -189,8 +353,12 @@ export default function KnowledgeGraph({
     const dist = Math.hypot(e.clientX - d.downX, e.clientY - d.downY);
     const isClick = (hitTarget || dist <= 6) && dist <= 10;
 
-    if (d.part === 'node' && d.id && isClick) {
-      onPick?.(picked === d.id ? null : (NODES.find((n) => n.id === d.id) ?? null));
+    if (d.part === 'node' && d.id) {
+      if (isClick) onPick?.(picked === d.id ? null : (NODES.find((n) => n.id === d.id) ?? null));
+      /* 松手：解除钉子，再让物理收几步，把最后的位置坐实 */
+      for (let k = 0; k < 12; k++) tick();
+      pinRef.current = null;
+      syncFromPhys();
     } else if (d.part === 'pan' && isClick) {
       onPick?.(null); /* 点空白 → 关面板 */
     }
