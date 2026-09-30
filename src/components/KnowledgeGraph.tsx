@@ -25,6 +25,7 @@ import {
   type KnowledgeNode,
 } from '../data/knowledge';
 import { gsap, useGSAP, ScrollTrigger, canAnimateDecor, canAnimateBase } from '../lib/motion';
+import { STATE_META, type KnowledgeState } from '../data/knowledge-state';
 
 /* 语义色 → 站点令牌。不用十色彩虹，靠色相家族分组 */
 const COLOR_VAR: Record<string, string> = {
@@ -118,6 +119,8 @@ type Props = {
   className?: string;
   onPick?: (node: KnowledgeNode | null) => void;
   picked?: string | null;
+  /** 学科 id → 学习状态。缺省视为未学习 */
+  state?: Record<string, KnowledgeState>;
 };
 
 export default function KnowledgeGraph({
@@ -125,10 +128,13 @@ export default function KnowledgeGraph({
   className = '',
   onPick,
   picked = null,
+  state,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const panRef = useRef<SVGGElement>(null);
+  /** 节点层：入场淡入由它承担，好让单个节点组的 opacity 完全归 React 管 */
+  const nodeLayerRef = useRef<SVGGElement>(null);
   const [hover, setHover] = useState<string | null>(null);
 
   /* 节点位置。初始值来自离线数据；拖动后只改这里，数据文件不动。 */
@@ -446,19 +452,45 @@ export default function KnowledgeGraph({
         );
       }
 
-      /* 节点从团心炸开就位 */
+      /* 节点从团心炸开就位。
+
+         ⚠ 这里刻意 **不** 让 GSAP 碰节点组的 opacity，淡入交给父层 <g>。
+         原因是同一个坑我踩过两次：GSAP 会把 opacity 写成元素内联样式并在
+         动画结束后留下（或经 clearProps 删掉），而 React 只在 style 对象
+         "变化"时才写 DOM —— 它以为值还是上次那个，于是内联被删后就再没补回来。
+         节点的 opacity 现在承载三态语义（未学习 0.55），被内联样式盖住就退化成
+         单态；被删掉则三态全变成 1。两种都错。
+
+         彻底的做法是消除争用：GSAP 只动父层 opacity 与节点的 transform，
+         节点组的 opacity 永远只由 React 写。 */
+      if (nodeLayerRef.current) {
+        tl.fromTo(nodeLayerRef.current, { opacity: 0 }, { opacity: 1, duration: 0.75 }, 0.25);
+      }
       tl.fromTo(
         nodeEls,
-        { scale: 0, opacity: 0, transformOrigin: 'center center' },
-        { scale: 1, opacity: 1, duration: 0.7, ease: 'back.out(1.7)', stagger: { each: 0.012, from: 'random' } },
+        { scale: 0, transformOrigin: 'center center' },
+        {
+          scale: 1,
+          duration: 0.7,
+          ease: 'back.out(1.7)',
+          stagger: { each: 0.012, from: 'random' },
+        },
         0.25,
       );
 
-      /* 标签最后浮现：先看结构，再读名字 */
+      /* 标签最后浮现：先看结构，再读名字。
+         标签同样有入场透明度，也一并交还给 React（标签没有状态透明度，
+         但留着内联值会让未来的样式改动失效）。 */
       tl.fromTo(
         labelEls,
         { opacity: 0, y: -4 },
-        { opacity: 1, y: 0, duration: 0.5, stagger: { each: 0.008, from: 'start' } },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 0.5,
+          stagger: { each: 0.008, from: 'start' },
+          clearProps: 'opacity',
+        },
         '-=0.35',
       );
 
@@ -563,25 +595,37 @@ export default function KnowledgeGraph({
             })}
           </g>
 
-          {/* ---- 节点：实心圆 + 正下方的标签 ---- */}
-          <g>
+          {/* ---- 节点：实心圆 + 正下方的标签 ----
+             这一个 <g> 是"淡入"的承担者：GSAP 只动它，不动单个节点组的 opacity。
+             原因见下方入场动效的注释 —— GSAP 在节点组上写 opacity 会与
+              学习状态的透明度（React 管的）打架，且 clearProps 之后 React 不会补写。 */}
+          <g ref={nodeLayerRef}>
             {NODES.map((n) => {
               const color = COLOR_VAR[CAT_COLOR_OF[n.cat]];
               const dim = isDim(n.id);
               const isFocus = n.id === focusId;
               const isHub = n.deg >= 15;
               const q = pos[n.id];
+              const st = STATE_META[state?.[n.id] ?? 'todo'];
+              /* 三态用几何 + 饱和度编码（不占额外颜色，见 data/knowledge-state.ts）：
+                   已学习：实心，无外环
+                   学习中：实心 + 紧贴的细外环
+                   未学习：实心（降饱和）+ 略远的外环
+                 外环与"选中态"用不同半径，互不遮挡。 */
+              const stateRingR = st.ringGap == null ? null : n.r + st.ringGap;
               return (
                 <g
                   key={n.id}
                   data-node={n.id}
+                  data-state={state?.[n.id] ?? 'todo'}
                   /* data-focus 标记"当前悬停/选中的是不是这个节点"。
                      渲染本身靠内联 opacity/stroke 表达，DOM 上看不出判定结果，
                      有了它悬停精度才能被实测（探针读这个属性）。 */
                   data-focus={isFocus ? '1' : '0'}
                   transform={`translate(${q.x} ${q.y})`}
                   style={{
-                    opacity: dim ? 0.12 : 1,
+                    /* 悬停淡出是"交互反馈"，在状态饱和度之上再乘一层 */
+                    opacity: dim ? 0.12 : st.displayOpacity,
                     transition: 'opacity 220ms ease',
                     cursor: interactive ? 'pointer' : 'default',
                   }}
@@ -596,17 +640,31 @@ export default function KnowledgeGraph({
                       style={{ mixBlendMode: 'screen' }}
                     />
                   ) : null}
-                  {/* 选中时的一圈细环（fill 保持实心，不加半透明填充） */}
-                  {isFocus ? (
+                  {/* 学习状态外环 */}
+                  {stateRingR != null ? (
                     <circle
-                      r={n.r + 6}
+                      data-state-ring
+                      r={stateRingR}
                       fill="none"
                       stroke={color}
-                      strokeWidth={1.6}
-                      opacity={0.9}
+                      strokeWidth={st.ringWidth}
+                      strokeOpacity={0.9}
                       style={{ pointerEvents: 'none' }}
                     />
                   ) : null}
+                  {/* 选中：一圈更远的虚线光环，与状态外环区分开 */}
+                  {isFocus ? (
+                    <circle
+                      r={(stateRingR ?? n.r) + 7}
+                      fill="none"
+                      stroke="var(--color-accent)"
+                      strokeWidth={1.6}
+                      strokeDasharray="3 4"
+                      opacity={0.95}
+                      style={{ pointerEvents: 'none' }}
+                    />
+                  ) : null}
+                  {/* 节点本体：始终实心（明确要求） */}
                   <circle r={n.r} fill={color} fillOpacity={1} />
                   {/* 标签：一律在节点正下方（dy = 半径 + 12），与桌面版一致。
                       不做翻转、不做水平偏移 —— 用户明确要求"所有文字在节点下方"。 */}

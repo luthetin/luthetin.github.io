@@ -3,6 +3,7 @@ import { ArrowUpRight } from '@phosphor-icons/react';
 import KnowledgeGraph from '../components/KnowledgeGraph';
 import { Reveal, SectionHeading } from '../components/ui';
 import { KNOWLEDGE_META, NODES, CAT_META } from '../data/knowledge';
+import { defaultStateMap } from '../data/knowledge-state';
 
 /* ----------------------------------------------------------------------------
    知识谱系（首页模块）
@@ -17,6 +18,8 @@ import { KNOWLEDGE_META, NODES, CAT_META } from '../data/knowledge';
 
 export default function Knowledge() {
   const cats = Object.keys(CAT_META).length;
+  /* 首页是只读预览，用仓库里的默认状态（页面上改过的存在本机，不带到这里） */
+  const state = defaultStateMap();
 
   return (
     <section id="knowledge" className="border-t border-line py-24 md:py-32">
@@ -75,7 +78,7 @@ export default function Knowledge() {
             <div className="lg:col-span-8">
               <div className="plate overflow-hidden transition-colors duration-500 group-hover:border-accent/40">
                 <div className="relative aspect-[1138/724] w-full">
-                  <KnowledgeGraph variant="preview" className="absolute inset-0" />
+                  <KnowledgeGraph variant="preview" className="absolute inset-0" state={state} />
                 </div>
               </div>
               <p className="mono-label mt-3">

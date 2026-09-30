@@ -12,6 +12,14 @@ import {
   type KnowledgeNode,
   type KnowledgeCat,
 } from '../data/knowledge';
+import {
+  STATE_META,
+  STATE_ORDER,
+  loadOverrides,
+  saveOverrides,
+  defaultStateMap,
+  type KnowledgeState,
+} from '../data/knowledge-state';
 
 /* ============================================================================
    知识谱系 /knowledge
@@ -38,10 +46,72 @@ const CAT_COLOR: Record<string, string> = {
   iris: 'var(--color-iris)',
 };
 
+/* ----------------------------------------------------------------------------
+   学习状态图例
+   三种状态不用颜色区分（站点的辅色各绑一个语义位置，占满了），
+   而是用"外环 + 饱和度"编码，所以图例也用同样的几何画出来 ——
+   和图上节点同源，看一次就能对上号。
+   -------------------------------------------------------------------------- */
+function StateLegend({ counts }: { counts: Record<KnowledgeState, number> }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
+      {STATE_ORDER.map((s) => {
+        const m = STATE_META[s];
+        const r = 9;
+        const ring = m.ringGap == null ? null : r + m.ringGap;
+        return (
+          <span key={s} className="inline-flex items-center gap-2.5">
+            <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true" className="shrink-0">
+              <g transform="translate(20 20)" opacity={m.displayOpacity}>
+                {ring != null ? (
+                  <circle
+                    r={ring}
+                    fill="none"
+                    stroke="var(--color-accent)"
+                    strokeWidth={m.ringWidth}
+                    strokeOpacity={0.9}
+                  />
+                ) : null}
+                <circle r={r} fill="var(--color-accent)" fillOpacity={1} />
+              </g>
+            </svg>
+            <span className="text-[0.82rem] text-muted">
+              {m.label}
+              <span className="num ml-1.5 text-faint">{counts[s]}</span>
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Knowledge() {
   const [picked, setPicked] = useState<KnowledgeNode | null>(null);
 
-  /* 选中节点的邻接学科名（面板里展示） */
+  /* 学习状态：默认值来自 data/knowledge-state.ts，页面上的修改存 localStorage，
+     只影响这台浏览器（不动仓库里的默认值）。 */
+  const [state, setState] = useState<Record<string, KnowledgeState>>(() => ({
+    ...defaultStateMap(),
+    ...loadOverrides(),
+  }));
+
+  const setOne = (id: string, next: KnowledgeState) => {
+    setState((prev) => {
+      const merged = { ...prev, [id]: next };
+      saveOverrides(merged);
+      return merged;
+    });
+  };
+
+  /* 三态计数 */
+  const counts = useMemo(() => {
+    const c: Record<KnowledgeState, number> = { learned: 0, studying: 0, todo: 0 };
+    for (const n of NODES) c[state[n.id] ?? 'todo']++;
+    return c;
+  }, [state]);
+
+  /* 选中节点的邻接学科 */
   const neighbours = useMemo(() => {
     if (!picked) return [];
     return LINKS.filter((l) => l.a === picked.id || l.b === picked.id)
@@ -72,12 +142,17 @@ export default function Knowledge() {
             className="aspect-[1138/724] w-full"
             picked={picked?.id ?? null}
             onPick={(n) => setPicked(n)}
+            state={state}
           />
         </div>
 
-        <p className="mono-label mt-5">
-          悬停看邻接 · 点击节点展开该学科的工具与内容
-        </p>
+        {/* 图例：与图上节点用同一套几何，看一次就能对上号 */}
+        <div className="mt-7 border-t border-line-soft pt-5">
+          <StateLegend counts={counts} />
+          <p className="mono-label mt-4">
+            悬停看邻接 · 点击节点展开该学科的工具与内容 · 拖动节点看关系如何牵动
+          </p>
+        </div>
       </section>
 
       {/* ---------------------------------------------------------- 选中面板 */}
@@ -92,6 +167,35 @@ export default function Knowledge() {
               <p className="num mt-3 text-[0.82rem] text-muted">
                 {picked.deg} 条关联 · 半径 {picked.r.toFixed(1)}
               </p>
+
+              {/* 学习状态：默认值是起点，这里可以直接改（存本机） */}
+              <div className="mt-6">
+                <div className="mono-label">学习状态</div>
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  {STATE_ORDER.map((s) => {
+                    const cur = (state[picked.id] ?? 'todo') === s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        aria-pressed={cur}
+                        onClick={() => setOne(picked.id, s)}
+                        className={`rounded-[var(--radius-tile)] border px-3 py-1 text-[0.78rem] transition-colors ${
+                          cur
+                            ? 'border-accent bg-accent/10 text-accent'
+                            : 'border-line text-faint hover:border-accent hover:text-accent'
+                        }`}
+                      >
+                        {STATE_META[s].label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2.5 text-[0.72rem] leading-relaxed text-faint">
+                  改的是本机记录，不动仓库里的默认值。
+                </p>
+              </div>
+
               <div className="mt-6 flex flex-wrap gap-2">
                 {neighbours.map((n) => (
                   <button
@@ -148,21 +252,41 @@ export default function Knowledge() {
                   <span className="mono-label">{items.length}</span>
                 </div>
                 <ul className="mt-3 flex flex-wrap gap-2">
-                  {items.map((n) => (
-                    <li key={n.id}>
-                      <button
-                        type="button"
-                        onClick={() => setPicked(n)}
-                        className={`rounded-[var(--radius-tile)] border px-2 py-0.5 text-[0.72rem] transition-colors ${
-                          picked?.id === n.id
-                            ? 'border-accent text-accent'
-                            : 'border-line text-faint hover:border-accent hover:text-accent'
-                        }`}
-                      >
-                        {n.name}
-                      </button>
-                    </li>
-                  ))}
+                  {items.map((n) => {
+                    const s = state[n.id] ?? 'todo';
+                    const m = STATE_META[s];
+                    /* 状态点：与图上同一套几何（外环距离 + 饱和度） */
+                    return (
+                      <li key={n.id}>
+                        <button
+                          type="button"
+                          onClick={() => setPicked(n)}
+                          title={m.label}
+                          className={`inline-flex items-center gap-1.5 rounded-[var(--radius-tile)] border px-2 py-0.5 text-[0.72rem] transition-colors ${
+                            picked?.id === n.id
+                              ? 'border-accent text-accent'
+                              : 'border-line text-faint hover:border-accent hover:text-accent'
+                          }`}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" className="shrink-0">
+                            <g transform="translate(7 7)" opacity={m.displayOpacity}>
+                              {m.ringGap != null ? (
+                                <circle
+                                  r={3.6 + m.ringGap * 0.22}
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={1.2}
+                                  strokeOpacity={0.85}
+                                />
+                              ) : null}
+                              <circle r="3.6" fill="currentColor" />
+                            </g>
+                          </svg>
+                          {n.name}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             );
