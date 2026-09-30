@@ -35,6 +35,38 @@ const COLOR_VAR: Record<string, string> = {
   amber: 'var(--color-amber)',
   iris: 'var(--color-iris)',
 };
+/** 语义色 → 十六进制。未学习要把颜色压向灰再变暗，
+    令牌是 var(--…) 没法参与混色运算，所以这里留一份十六进制。 */
+const COLOR_HEX: Record<string, string> = {
+  accent: '#e0708f',
+  ice: '#7fa8d8',
+  teal: '#4fb3a5',
+  amber: '#e0a758',
+  iris: '#9a83d8',
+};
+/** 灰色基准：站点 --color-muted */
+const GREY = '#8b8b93';
+
+const hex2rgb = (h: string) => {
+  const v = h.replace('#', '');
+  return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)];
+};
+const rgb2hex = (r: number, g: number, b: number) =>
+  '#' + [r, g, b].map((x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('');
+
+/**
+ * 按学习状态算出这个节点该显示的颜色。
+ * 未学习：向灰混 78% 再乘 0.62 变暗 —— 结果仍然是该门类的色相，
+ * 只是灰掉了、暗下去了。保持实心，不透出后面的连线（比降透明度干净得多）。
+ */
+const nodeColor = (cat: string, greyMix: number, darken: number) => {
+  const base = COLOR_HEX[cat] ?? GREY;
+  if (greyMix <= 0 && darken >= 1) return base;
+  const a = hex2rgb(base);
+  const b = hex2rgb(GREY);
+  const mix = a.map((v, i) => v + (b[i] - v) * greyMix);
+  return rgb2hex(mix[0] * darken, mix[1] * darken, mix[2] * darken);
+};
 
 const VW = VIEW.w;
 const VH = VIEW.h;
@@ -660,17 +692,18 @@ export default function KnowledgeGraph({
               学习状态的透明度（React 管的）打架，且 clearProps 之后 React 不会补写。 */}
           <g ref={nodeLayerRef}>
             {NODES.map((n) => {
-              const color = COLOR_VAR[CAT_COLOR_OF[n.cat]];
               const dim = isDim(n.id);
               const isFocus = n.id === focusId;
               const isHub = n.deg >= 15;
               const q = pos[n.id];
               const st = STATE_META[state?.[n.id] ?? 'todo'];
-              /* 三态用几何 + 饱和度编码（不占额外颜色，见 data/knowledge-state.ts）：
-                   已学习：实心，无外环
-                   学习中：实心 + 紧贴的细外环
-                   未学习：实心（降饱和）+ 略远的外环
-                 外环与"选中态"用不同半径，互不遮挡。 */
+              /* 三态编码（见 data/knowledge-state.ts）：
+                   已学习  圆 + 圈
+                   学习中  圆
+                   未学习  圆（灰、暗）
+                 未学习不是"降低透明度"，而是把门类色压向灰再调暗 ——
+                 保持实心，不透出后面的连线。 */
+              const color = nodeColor(CAT_COLOR_OF[n.cat], st.greyMix, st.darken);
               const stateRingR = st.ringGap == null ? null : n.r + st.ringGap;
               return (
                 <g
@@ -683,8 +716,9 @@ export default function KnowledgeGraph({
                   data-focus={isFocus ? '1' : '0'}
                   transform={`translate(${q.x} ${q.y})`}
                   style={{
-                    /* 悬停淡出是"交互反馈"，在状态饱和度之上再乘一层 */
-                    opacity: dim ? 0.12 : st.displayOpacity,
+                    /* 三态不再改整体透明度（改颜色，见上）；
+                       这里的 opacity 只用于"悬停聚焦时把非邻接节点退到背景"。 */
+                    opacity: dim ? 0.12 : 1,
                     transition: 'opacity 220ms ease',
                     cursor: interactive ? 'pointer' : 'default',
                   }}
@@ -699,7 +733,7 @@ export default function KnowledgeGraph({
                       style={{ mixBlendMode: 'screen' }}
                     />
                   ) : null}
-                  {/* 学习状态外环 */}
+                  {/* 已学习：圆外一圈 */}
                   {stateRingR != null ? (
                     <circle
                       data-state-ring
@@ -707,14 +741,14 @@ export default function KnowledgeGraph({
                       fill="none"
                       stroke={color}
                       strokeWidth={st.ringWidth}
-                      strokeOpacity={0.9}
+                      strokeOpacity={0.95}
                       style={{ pointerEvents: 'none' }}
                     />
                   ) : null}
-                  {/* 选中：一圈更远的虚线光环，与状态外环区分开 */}
+                  {/* 选中：一圈更远的虚线光环，与状态圈区分开 */}
                   {isFocus ? (
                     <circle
-                      r={(stateRingR ?? n.r) + 7}
+                      r={(stateRingR ?? n.r) + 8}
                       fill="none"
                       stroke="var(--color-accent)"
                       strokeWidth={1.6}

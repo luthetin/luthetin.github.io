@@ -49,9 +49,22 @@ const CAT_COLOR: Record<string, string> = {
 /* ----------------------------------------------------------------------------
    学习状态图例
    三种状态不用颜色区分（站点的辅色各绑一个语义位置，占满了），
-   而是用"外环 + 饱和度"编码，所以图例也用同样的几何画出来 ——
-   和图上节点同源，看一次就能对上号。
+   而是"圆 / 圆+圈 / 灰暗的圆"，所以图例用同样的画法 —— 与图上节点同源。
+   图例用中性的灰玫瑰做示意色：真实节点带各自门类的色相，
+   但"灰暗程度"的关系是一致的，看一次就能对上号。
    -------------------------------------------------------------------------- */
+const LEGEND_BASE = '#e0708f';   // = --color-accent
+const LEGEND_GREY = '#8b8b93';   // = --color-muted
+function legendColor(greyMix: number, darken: number) {
+  const hex2rgb = (h: string) => {
+    const v = h.replace('#', '');
+    return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)];
+  };
+  const a = hex2rgb(LEGEND_BASE), b = hex2rgb(LEGEND_GREY);
+  const m = a.map((v, i) => v + (b[i] - v) * greyMix);
+  return '#' + m.map((x) => Math.max(0, Math.min(255, Math.round(x * darken))).toString(16).padStart(2, '0')).join('');
+}
+
 function StateLegend({ counts }: { counts: Record<KnowledgeState, number> }) {
   return (
     <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
@@ -59,20 +72,15 @@ function StateLegend({ counts }: { counts: Record<KnowledgeState, number> }) {
         const m = STATE_META[s];
         const r = 9;
         const ring = m.ringGap == null ? null : r + m.ringGap;
+        const c = legendColor(m.greyMix, m.darken);
         return (
           <span key={s} className="inline-flex items-center gap-2.5">
             <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true" className="shrink-0">
-              <g transform="translate(20 20)" opacity={m.displayOpacity}>
+              <g transform="translate(20 20)">
                 {ring != null ? (
-                  <circle
-                    r={ring}
-                    fill="none"
-                    stroke="var(--color-accent)"
-                    strokeWidth={m.ringWidth}
-                    strokeOpacity={0.9}
-                  />
+                  <circle r={ring} fill="none" stroke={c} strokeWidth={m.ringWidth} strokeOpacity={0.95} />
                 ) : null}
-                <circle r={r} fill="var(--color-accent)" fillOpacity={1} />
+                <circle r={r} fill={c} fillOpacity={1} />
               </g>
             </svg>
             <span className="text-[0.82rem] text-muted">
@@ -269,14 +277,15 @@ export default function Knowledge() {
                           }`}
                         >
                           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" className="shrink-0">
-                            <g transform="translate(7 7)" opacity={m.displayOpacity}>
+                            {/* 三态：已学习 = 圆 + 圈；学习中 = 圆；未学习 = 圆但更暗（opacity 压低示意"灰"） */}
+                            <g transform="translate(7 7)" opacity={m.greyMix > 0 ? 0.42 : 1}>
                               {m.ringGap != null ? (
                                 <circle
-                                  r={3.6 + m.ringGap * 0.22}
+                                  r="4.2"
                                   fill="none"
                                   stroke="currentColor"
-                                  strokeWidth={1.2}
-                                  strokeOpacity={0.85}
+                                  strokeWidth={1.1}
+                                  strokeOpacity={0.95}
                                 />
                               ) : null}
                               <circle r="3.6" fill="currentColor" />

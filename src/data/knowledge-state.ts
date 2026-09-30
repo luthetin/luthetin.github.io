@@ -14,11 +14,12 @@
    ── 为什么不用颜色区分三态 ───────────────────────────────────────────────
    站点规范要求"每个辅色只绑一个语义位置"（accent 只用于强调）。
    三态各占一色会直接破坏这条克制感，也对色觉障碍不友好。
-   所以用**几何 + 饱和度**编码，三者共用同一个语义色：
-     已学习  实心 + 无外环              ← 最"实"
-     学习中  实心 + 紧贴的细外环         ← 正在成形
-     未学习  实心（降饱和）+ 略远的外环   ← 还没开始
-   节点始终是实心的（这一条是明确要求），区别全在外环与饱和度的推进上。
+   所以用**几何 + 明度**编码，三者共用同一个语义色：
+     已学习  圆 + 圈          ← 最"实"，有边界
+     学习中  圆               ← 正在成形
+     未学习  圆（灰、暗）      ← 还没开始
+   节点始终是实心的（明确要求）。未学习的"灰"是把门类色压向灰并调暗，
+   不是降透明度 —— 降透明度会透出后面的连线、也丢掉门类色相。
    ========================================================================= */
 
 export type KnowledgeState = 'learned' | 'studying' | 'todo';
@@ -30,15 +31,22 @@ export const STATE_META: Record<
     /** 外环半径 = 节点半径 + ringGap；null 表示不画外环 */
     ringGap: number | null;
     ringWidth: number;
-    /** 节点整体的显示不透明度（越低越"退到背景"） */
-    displayOpacity: number;
+    /**
+     * 颜色向"灰"压的比例（0 = 保留门类色，1 = 全灰）。
+     * 未学习用这个变暗/变灰，而不是降透明度 ——
+     * 降透明度会透出后面的连线、显脏，也丢掉门类色相。
+     */
+    greyMix: number;
+    /** 变暗系数：数值越低越暗 */
+    darken: number;
   }
 > = {
-  learned: { label: '已学习', ringGap: null, ringWidth: 0, displayOpacity: 1 },
-  studying: { label: '学习中', ringGap: 5, ringWidth: 2.2, displayOpacity: 1 },
-  /* 未学习用 0.72 而不是更低：它们占了一半以上（29/52），
-     退得太远整张图会显得空，也会让人误以为"这些学科不重要"。 */
-  todo: { label: '未学习', ringGap: 9, ringWidth: 1.5, displayOpacity: 0.72 },
+  /* 已学习：圆 + 圈（圈在圆外一点点，干净的一圈） */
+  learned: { label: '已学习', ringGap: 4, ringWidth: 1.6, greyMix: 0, darken: 1 },
+  /* 学习中：只有圆 */
+  studying: { label: '学习中', ringGap: null, ringWidth: 0, greyMix: 0, darken: 1 },
+  /* 未学习：圆，但灰且暗 */
+  todo: { label: '未学习', ringGap: null, ringWidth: 0, greyMix: 0.78, darken: 0.62 },
 };
 
 /** 展示顺序：学习进度由高到低 */
