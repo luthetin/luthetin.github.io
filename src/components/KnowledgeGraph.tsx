@@ -152,6 +152,12 @@ export default function KnowledgeGraph({
     downX: number;
     downY: number;
   } | null>(null);
+
+  /* 入场动画会把 stroke-dasharray 写成内联样式，动画结束后清掉。
+     但 React 只在 style 对象变化时重设，清掉之后跨团虚线的 8 10 就回不来了。
+     这个计数用来在动画结束后强制重渲一次，让 dash 声明重新落到 DOM 上。
+     看到这里别删 —— 少了它所有线都会变成实线（实测）。 */
+  const [dashEpoch, setDashEpoch] = useState(0);
   /* 平移偏移。跟缩放不同，这里只做纯平移，节点坐标不受影响。 */
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRefState = useRef(pan);
@@ -391,7 +397,23 @@ export default function KnowledgeGraph({
       /* 整片从"失焦"浮现 —— 比单纯淡入更有进入感 */
       tl.fromTo(svg, { opacity: 0, filter: 'blur(10px)' }, { opacity: 1, filter: 'blur(0px)', duration: 0.85 });
 
-      /* 连线"接线"：先按各自长度设 dashoffset，再收回 */
+      /* 连线"接线"：先按各自长度设 dashoffset，再收回。
+         ⚠ 画完之后必须把这些内联的 dash 属性清掉！
+         GSAP 会把 stroke-dasharray / stroke-dashoffset 写成元素的内联样式，
+         值是"动画那一刻的线长"。拖动节点后线长变了，那个内联值不会跟着变：
+         只要旧值大于新线长，整条线就落在 dash 的空隙里 —— 完全画不出来。
+         实测拖动后有 155/239 条线因此消失，就是"线是断的"的原因。
+         清掉之后由 JSX 上的 strokeDasharray 属性接管（跨团虚线才有 8 10）。 */
+      const clearDash = () => {
+        linkEls.forEach((el) => {
+          el.style.removeProperty('stroke-dasharray');
+          el.style.removeProperty('stroke-dashoffset');
+        });
+        /* 清完之后必须让 React 重新写一次 dash 声明：
+           React 只在 style 对象变化时才更新 DOM，内联被清掉后它并不知道，
+           跨团虚线的 8 10 就再也回不来了（实测会全部变成实线）。 */
+        setDashEpoch((v) => v + 1);
+      };
       if (canAnimateDecor()) {
         linkEls.forEach((el) => {
           const len = el.getTotalLength ? el.getTotalLength() : 100;
@@ -404,6 +426,7 @@ export default function KnowledgeGraph({
             duration: 1.15,
             ease: 'power2.inOut',
             stagger: { each: 0.004, from: 'center', grid: 'auto' },
+            onComplete: clearDash,
           },
           0.1,
         );
@@ -501,7 +524,10 @@ export default function KnowledgeGraph({
               const dim = linkDim(l);
               return (
                 <line
-                  key={i}
+                  /* key 里带上 dashEpoch：入场动画清掉内联 dash 之后，
+                     把这几条线重新挂载一次，让 JSX 上的 dash 声明重新落进 DOM。
+                     否则 React 认为 style 没变、不更新，跨团虚线会全变实线。 */
+                  key={`${i}-${dashEpoch}`}
                   data-link
                   x1={a.x}
                   y1={a.y}
@@ -510,8 +536,14 @@ export default function KnowledgeGraph({
                   stroke={active ? 'var(--color-accent)' : 'var(--color-text)'}
                   strokeWidth={1.6}
                   strokeOpacity={active ? 0.85 : dim ? 0.06 : l.same ? 0.2 : 0.1}
-                  strokeDasharray={l.same ? undefined : '8 10'}
-                  style={{ transition: 'stroke-opacity 220ms ease, stroke 220ms ease' }}
+                  /* 双保险之二：把 dash 也声明在 style 里。
+                     GSAP 入场动画同样写的是内联样式，动画结束若清得不干净，
+                     旧值会把线整条吃掉（实测拖动后 155/239 条消失）。
+                     这里让最终态始终有一份明确的 dash 声明。 */
+                  style={{
+                    strokeDasharray: l.same ? 'none' : '8 10',
+                    transition: 'stroke-opacity 220ms ease, stroke 220ms ease',
+                  }}
                 />
               );
             })}
