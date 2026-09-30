@@ -69,7 +69,7 @@ export default function Knowledge() {
         <div className="w-full">
           <KnowledgeGraph
             variant="full"
-            className="aspect-[1055/718] w-full"
+            className="aspect-[1138/724] w-full"
             picked={picked?.id ?? null}
             onPick={(n) => setPicked(n)}
           />

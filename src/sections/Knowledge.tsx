@@ -74,7 +74,7 @@ export default function Knowledge() {
             {/* 右：图（静态预览，整块可点） */}
             <div className="lg:col-span-8">
               <div className="plate overflow-hidden transition-colors duration-500 group-hover:border-accent/40">
-                <div className="relative aspect-[1015/709] w-full">
+                <div className="relative aspect-[1138/724] w-full">
                   <KnowledgeGraph variant="preview" className="absolute inset-0" />
                 </div>
               </div>

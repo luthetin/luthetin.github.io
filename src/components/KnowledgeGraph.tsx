@@ -301,6 +301,10 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
                   />
                   <text
                     data-label
+                    /* dx/dy 都是相对节点的偏移，且已按"文字基线"语义算好，
+                       直接接在 translate 到节点的分组里即可。
+                       两个轴都要用：只给 y 会让左右放置的标签被摆回节点正中间。 */
+                    x={n.labelDx}
                     y={n.labelDy}
                     textAnchor="middle"
                     /* 字号压小：1000 基准下 13 大约相当于屏上 11px。
