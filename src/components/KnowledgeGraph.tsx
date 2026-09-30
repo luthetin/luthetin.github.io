@@ -181,6 +181,88 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
     { scope: rootRef, dependencies: [variant] },
   );
 
+  /* ------------------------------------------------- full 版：拖动平移与滚轮缩放
+     桌面版本来就能拖能缩，上一轮我误以为"多出来的控件"把它们一起去掉了。
+     这里按桌面版的交互做回来：拖动平移、滚轮以光标为锚点缩放、双击复位。
+     位置本身仍是离线算好的静态布局，交互只改视图变换，不改节点坐标。 */
+  const viewRef = useRef({ zoom: 1, x: 0, y: 0 });
+  const dragRef = useRef<{ x: number; y: number; px: number; py: number; moved: boolean } | null>(null);
+
+  const applyView = useCallback(() => {
+    const g = panRef.current;
+    if (!g) return;
+    const { zoom, x, y } = viewRef.current;
+    g.setAttribute('transform', `translate(${x} ${y}) scale(${zoom})`);
+  }, []);
+
+  const resetView = useCallback(() => {
+    viewRef.current = { zoom: 1, x: 0, y: 0 };
+    applyView();
+  }, [applyView]);
+
+  /* 挂载时就把初始 transform 写上（否则第一次交互前它是空的，
+     既不利于调试，也让"复位"看起来像没生效） */
+  useGSAP(
+    () => {
+      applyView();
+    },
+    { scope: rootRef, dependencies: [variant] },
+  );
+
+  const zoomBy = useCallback(
+    (k: number, cx = VIEW.x + VW / 2, cy = VIEW.y + VH / 2) => {
+      const v = viewRef.current;
+      const next = Math.min(4, Math.max(0.6, v.zoom * k));
+      v.x = cx - (cx - v.x) * (next / v.zoom);
+      v.y = cy - (cy - v.y) * (next / v.zoom);
+      v.zoom = next;
+      applyView();
+    },
+    [applyView],
+  );
+
+  /* 屏幕坐标 → viewBox 坐标（等比缩放，只需线性换算） */
+  const toView = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const r = svg.getBoundingClientRect();
+    return {
+      x: VIEW.x + ((clientX - r.left) / r.width) * VW,
+      y: VIEW.y + ((clientY - r.top) / r.height) * VH,
+    };
+  }, []);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (variant !== 'full') return;
+    /* 点在节点上时不启动平移，交给节点的点击处理 */
+    if ((e.target as Element)?.closest?.('[data-node]')) return;
+    dragRef.current = { x: e.clientX, y: e.clientY, px: viewRef.current.x, py: viewRef.current.y, moved: false };
+    /* 用 try 包住：某些情况下（pointer 已失效、合成事件没有真实 pointerId）
+       setPointerCapture 会抛 NotFoundError，一旦抛出后面的逻辑就不会执行，
+       表现成"拖不动"。捕获本身只是锦上添花，失败也不该影响平移。 */
+    try { (e.currentTarget as Element).setPointerCapture?.(e.pointerId); } catch { /* 忽略 */ }
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (variant !== 'full' || !dragRef.current) return;
+    const d = dragRef.current;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const r = svg.getBoundingClientRect();
+    const dx = (e.clientX - d.x) * (VW / r.width);
+    const dy = (e.clientY - d.y) * (VH / r.height);
+    if (Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 4) d.moved = true;
+    viewRef.current.x = d.px + dx;
+    viewRef.current.y = d.py + dy;
+    applyView();
+  };
+  const onPointerUp = () => { dragRef.current = null; };
+
+  const onWheel = (e: React.WheelEvent) => {
+    if (variant !== 'full') return;
+    const p = toView(e.clientX, e.clientY);
+    zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12, p.x, p.y);
+  };
+
   /* 高亮状态：非邻接的一切都退到背景 */
   const isDim = (id: string) => {
     if (!focusId) return false;
@@ -205,7 +287,13 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
         className="h-full w-full"
         role={interactive ? 'application' : 'img'}
         aria-label={`知识谱系：${NODES.length} 门学科、${LINKS.length} 条关联`}
-        style={{ cursor: interactive ? 'default' : 'default' }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+        onWheel={onWheel}
+        onDoubleClick={interactive ? resetView : undefined}
+        style={{ cursor: interactive ? 'grab' : 'default', touchAction: interactive ? 'none' : undefined }}
       >
         <defs>
           {/* 枢纽的柔光：不用滤镜，用径向渐变叠加，更省 */}
@@ -214,13 +302,13 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
             <stop offset="70%" stopColor="var(--color-accent)" stopOpacity="0.06" />
             <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0" />
           </radialGradient>
-          <radialGradient id="kg-vignette" cx="50%" cy="46%" r="62%">
-            <stop offset="55%" stopColor="#000" stopOpacity="0" />
-            <stop offset="100%" stopColor="#000" stopOpacity="0.55" />
-          </radialGradient>
+          {/* 这里原本有一个"四周压暗"的暗角 rect（mix-blend multiply）。
+              在浅底页面上它看不出来，但在本站的深底上会变成一块明显的暗矩形，
+              看起来就像图外面套了个框，标签压到边缘也像被切。
+              桌面版没有这一层，直接去掉。 */}
         </defs>
 
-        <g ref={panRef}>
+        <g ref={panRef} data-pan>
           {/* ---- 连线：团内实线承担结构，跨团虚线退到背景 ---- */}
           <g>
             {LINKS.map((l, i) => {
@@ -307,9 +395,9 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
                     x={n.labelDx}
                     y={n.labelDy}
                     textAnchor="middle"
-                    /* 字号压小：1000 基准下 13 大约相当于屏上 11px。
-                       之前 16~22 偏大，是"字和节点、别的字重合"的主因之一。 */
-                    fontSize={n.r > 24 ? 14 : n.r > 14 ? 13 : 12}
+                    /* 字号分档与桌面版一致（r>17 → 12.5 / r>10 → 11 / 其余 10），
+                       桌面版就是这样贴紧节点的。 */
+                    fontSize={n.r > 17 ? 12.5 : n.r > 10 ? 11 : 10}
                     fill={isFocus ? 'var(--color-text)' : 'var(--color-muted)'}
                     style={{
                       fontFamily: 'var(--font-sans)',
@@ -327,16 +415,6 @@ export default function KnowledgeGraph({ variant = 'preview', className = '', on
               );
             })}
           </g>
-
-          {/* 四周压暗，让中心的团自然成为焦点 */}
-          <rect
-            x={0}
-            y={0}
-            width={VW}
-            height={VH}
-            fill="url(#kg-vignette)"
-            style={{ pointerEvents: 'none', mixBlendMode: 'multiply' }}
-          />
         </g>
       </svg>
     </div>
